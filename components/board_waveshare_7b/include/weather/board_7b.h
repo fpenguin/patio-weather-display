@@ -22,8 +22,6 @@ extern "C" {
 #define BOARD_7B_LCD_H_RES 1024
 #define BOARD_7B_LCD_V_RES 600
 
-/* Keep these identical in the BSP and the esp_lvgl_adapter registration. */
-#define BOARD_7B_LVGL_ROTATION  ESP_LV_ADAPTER_ROTATE_0
 #define BOARD_7B_LVGL_TEAR_MODE ESP_LV_ADAPTER_TEAR_AVOID_MODE_DEFAULT_RGB
 
 /**
@@ -35,7 +33,8 @@ extern "C" {
  * after initialization if the display must stay dark while the UI is created.
  */
 esp_err_t board_7b_init(esp_lcd_panel_handle_t *panel,
-                        esp_lcd_touch_handle_t *touch);
+                        esp_lcd_touch_handle_t *touch,
+                        esp_lv_adapter_rotation_t rotation);
 
 /** Enable or disable the panel backlight through expander output EXIO2. */
 esp_err_t board_7b_backlight(bool enabled);

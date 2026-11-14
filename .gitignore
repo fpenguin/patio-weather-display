@@ -2,6 +2,7 @@
 /work/
 /dist/
 /build/
+/build-host/
 /host/build/
 /managed_components/
 /sdkconfig.old

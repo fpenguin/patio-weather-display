@@ -13,6 +13,7 @@ set(WEATHER_CORE_DIR "${CMAKE_CURRENT_LIST_DIR}/../components/weather_core")
 
 add_library(weather_core_host STATIC
     "${WEATHER_CORE_DIR}/src/rainfall.cpp"
+    "${WEATHER_CORE_DIR}/src/timeline.cpp"
     "${WEATHER_CORE_DIR}/src/advice.cpp"
     "${WEATHER_CORE_DIR}/src/holidays.cpp"
     "${WEATHER_CORE_DIR}/src/validation.cpp"
@@ -33,6 +34,7 @@ endif()
 
 add_executable(weather_core_tests tests/test_core.cpp)
 target_link_libraries(weather_core_tests PRIVATE weather_core_host)
+target_include_directories(weather_core_tests PRIVATE "../components/board_waveshare_7b/include")
 
 enable_testing()
 add_test(NAME weather_core COMMAND weather_core_tests)
@@ -140,7 +142,10 @@ if(PATIO_BUILD_SIMULATOR)
 
     find_package(ZLIB REQUIRED)
     set(UI_DIR "${CMAKE_CURRENT_LIST_DIR}/../components/ui")
+    set(PATIO_DASHBOARD_FONTS "${UI_DIR}/fonts/patio_bold_14.c" "${UI_DIR}/fonts/patio_bold_20.c"
+        "${UI_DIR}/fonts/patio_bold_24.c" "${UI_DIR}/fonts/patio_bold_40.c" "${UI_DIR}/fonts/patio_semibold_26.c")
     add_executable(patio_weather_simulator
+        ${PATIO_DASHBOARD_FONTS}
         simulator/simulator_main.cpp
         simulator/png_writer.cpp
         "${UI_DIR}/src/icons.cpp"
@@ -162,6 +167,7 @@ if(PATIO_BUILD_SIMULATOR)
     )
 
     add_executable(ui_tests
+        ${PATIO_DASHBOARD_FONTS}
         tests/test_ui.cpp
         "${UI_DIR}/src/icons.cpp"
         "${UI_DIR}/src/weather_ui.cpp"

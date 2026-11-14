@@ -21,7 +21,7 @@ constexpr char kNamespace[] = "patio_cfg";
 constexpr char kSlotKeys[][8] = {"slot_a", "slot_b"};
 constexpr char kActiveKey[] = "active";
 constexpr std::uint32_t kMagic = 0x50415449U;  // "PATI"
-constexpr std::uint16_t kSchemaVersion = 4;
+constexpr std::uint16_t kSchemaVersion = 5;
 constexpr std::size_t kMaximumBlobBytes = 4096;
 
 struct PersistedBlob {
@@ -33,8 +33,9 @@ struct PersistedBlob {
     std::uint32_t crc32;
 };
 
-static_assert(sizeof(Settings) == 472 && offsetof(Settings, wake_distance_cm) == 468,
-              "Wake distance must occupy legacy trailing padding");
+static_assert(sizeof(Settings) == 472 && offsetof(Settings, wake_distance_cm) == 468 &&
+              offsetof(Settings, display_rotation) == 470,
+              "New settings must occupy legacy trailing padding");
 static_assert(offsetof(Settings, auto_off_seconds) == 6 && offsetof(Settings, dim_start_minute) == 8,
               "Keep the schema-2 settings layout for upgrades");
 static_assert(std::is_trivially_copyable_v<Settings>,
@@ -107,6 +108,14 @@ SlotResult read_slot(nvs_handle_t handle, std::uint8_t slot) {
     // Check the original CRC before interpreting legacy padding.
     if (result.blob.schema_version == 2) result.blob.settings.auto_off_seconds = 60;
     if (result.blob.schema_version < 4) result.blob.settings.wake_distance_cm = 100;
+    if (result.blob.schema_version < 5) {
+        result.blob.settings.display_rotation = 0;
+        result.blob.settings.settings_reserved = 0;
+    }
+    // Previously 0% could be saved as the awake level. Repair only that
+    // field after verifying the original CRC; keep location and other settings.
+    if (!result.blob.settings.brightness_percent)
+        result.blob.settings.brightness_percent = kDefaultReadingBrightness;
     if (!validate_settings(result.blob.settings).valid) {
         result.state = SlotState::Invalid;
         return result;

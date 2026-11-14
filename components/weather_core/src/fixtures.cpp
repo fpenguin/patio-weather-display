@@ -24,6 +24,7 @@ void add_hour(DashboardModel& model, int local_start_hour, float rain, int code 
     hour.local_date_key = 20261112;
     hour.rain_mm = Optional<float>::some(rain);
     hour.showers_mm = Optional<float>::some(0.0F);
+    hour.snowfall_cm = Optional<float>::some(0.0F);
     hour.weather_code = Optional<int>::some(code);
     hour.temperature_c = Optional<float>::some(12.0F);
     hour.apparent_temperature_c = Optional<float>::some(10.0F);
@@ -127,14 +128,14 @@ const char* fixture_name(FixtureId id) {
         "heat", "cold", "poor-air-quality", "high-uv", "weather-unavailable",
         "negative-temperature", "extreme-precipitation", "missing-values", "aqhi-10-plus",
         "stale-air-quality", "stale-weather", "multiple-alerts", "long-text",
-        "alert-feed-failure", "unsupported-coverage"};
+        "alert-feed-failure", "unsupported-coverage", "minimal-rain"};
     const auto index = static_cast<std::size_t>(id);
     return index < sizeof(names) / sizeof(names[0]) ? names[index] : "baseline";
 }
 
 bool fixture_from_name(const char* name, FixtureId& output) {
     if (!name) return false;
-    for (std::size_t i = 0; i <= static_cast<std::size_t>(FixtureId::UnsupportedCoverage); ++i) {
+    for (std::size_t i = 0; i <= static_cast<std::size_t>(FixtureId::MinimalRain); ++i) {
         if (std::strcmp(name, fixture_name(static_cast<FixtureId>(i))) == 0) {
             output = static_cast<FixtureId>(i);
             return true;
@@ -147,6 +148,20 @@ void make_fixture(FixtureId id, DashboardModel& model) {
     baseline(model);
     switch (id) {
         case FixtureId::BaselineRain: break;
+        case FixtureId::MinimalRain: {
+            set_date(model, kBaselineUtc + 2 * 86400);
+            clear_rain(model);
+            const float mm[] = {0.2F, 0.8F, 1.4F, 2.0F, 1.2F, 0.5F, 0.1F};
+            for (int i = 0; i < 7; ++i) {
+                auto& h = model.weather.hours[5 + i]; // 11:00–18:00, last hour trace.
+                h.rain_mm.value = mm[i];
+                h.weather_code.value = 61;
+                if (i >= 3 && i <= 5) h.gust_kmh.value = 45;
+            }
+            model.weather.current_temperature_c.value = 7;
+            model.weather.current_apparent_c.value = 5;
+            break;
+        }
         case FixtureId::RainPassed:
             set_date(model, 1794531600LL);  // 6:00 PM local
             break;
@@ -175,6 +190,7 @@ void make_fixture(FixtureId id, DashboardModel& model) {
         case FixtureId::StrongWind:
             clear_rain(model);
             model.weather.current_gust_kmh = Optional<float>::some(75.0F);
+            for(int i=4;i<=9;++i) model.weather.hours[i].gust_kmh.value=70;
             break;
         case FixtureId::Ice:
             clear_rain(model);
@@ -190,6 +206,7 @@ void make_fixture(FixtureId id, DashboardModel& model) {
             break;
         case FixtureId::Heat:
             clear_rain(model);
+            model.weather.current_temperature_c = Optional<float>::some(34.0F);
             model.weather.current_apparent_c = Optional<float>::some(38.0F);
             break;
         case FixtureId::Cold:
@@ -306,6 +323,20 @@ void make_fixture(FixtureId id, DashboardModel& model) {
             model.alerts.status.detail.assign(
                 "ECCC alerts are available only in Canada");
             break;
+    }
+    if (model.weather.hour_count && model.weather.status.state != SourceState::Unavailable) {
+        // Deterministic example inputs, never used by the live provider.
+        auto& day = model.weather.days[0];
+        const auto midnight = model.weather.hours[0].interval_start_utc - 6 * 3600;
+        day.anchor_utc = midnight + 12 * 3600;
+        day.sunrise_utc = midnight + (7 * 60 + 11) * 60;
+        day.sunset_utc = midnight + (17 * 60 + 23) * 60;
+        day.daylight_seconds = Optional<float>::some(day.sunset_utc - day.sunrise_utc);
+        const auto t = model.weather.current_temperature_c;
+        if (t.valid) {
+            day.high_c = Optional<float>::some(t.value + 2);
+            day.low_c = Optional<float>::some(t.value - 3);
+        }
     }
     finalize_advice(model);
 }

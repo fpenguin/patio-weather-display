@@ -1,4 +1,6 @@
 #include "weather/providers.hpp"
+#include "weather/timeline.hpp"
+#include "weather/time_zone.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -43,6 +45,26 @@ int main() {
     assert(weather.hours[7].interval_end_utc == 1794517200);
     assert(weather.hours[7].rain_mm.valid && weather.hours[7].rain_mm.value == 0.4F);
     assert(weather.hours[7].showers_mm.valid && weather.hours[7].showers_mm.value == 0.0F);
+    CivilTime today{};
+    assert(utc_to_local("America/Vancouver",1794505320,today));
+    auto daily=day_summary(weather,today,"America/Vancouver");
+    assert(daily.sun==DaySummary::Events && daily.rise==431 && daily.set==1043);
+    assert(daily.high_c.valid && daily.high_c.value==14 && daily.low_c.value==6);
+    const char mixed[] = R"({"hourly":{"time":[1794500000,1794503600,1794510800],"rain":[0,2,0],"weather_code":[95,1,3],"wind_speed_10m":[32,8,13],"wind_gusts_10m":[9,55,6],"uv_index":[0,7,1]}})";
+    WeatherSnapshot intervals{};
+    assert(parse_open_meteo_weather(mixed,sizeof(mixed)-1,1794505320,intervals));
+    const auto& h=intervals.hours[1];
+    assert(h.rain_mm.value==2 && h.uv_index.value==7 && h.weather_code.value==95 &&
+           h.wind_kmh.value==32 && h.gust_kmh.value==55);
+    assert(!intervals.hours[2].wind_kmh.valid && !intervals.hours[2].weather_code.valid &&
+           intervals.hours[2].uv_index.valid && !intervals.days[0].anchor_utc);
+    for(const std::string bad : {
+        R"({"hourly":{"time":[1794500000],"wind_speed_10m":[-1]}})",
+        R"({"daily":{"time":[1794466800],"temperature_2m_max":[3],"temperature_2m_min":[9]},"hourly":{"time":[1794500000]}})",
+        R"({"daily_units":{"temperature_2m_max":"°F"},"daily":{"time":[1794466800]},"hourly":{"time":[1794500000]}})"}) {
+        assert(!parse_open_meteo_weather(bad.data(),bad.size(),1794505320,weather));
+        assert(weather.days[0].high_c.value==14 && weather.hour_count==18);
+    }
 
     const std::string units = R"({"current_units":{"us_aqi":"USAQI","time":"unixtime"},"current":{"time":1700000000,"us_aqi":)";
     AirQualitySnapshot us{};
@@ -210,6 +232,7 @@ int main() {
     char url[1024]{};
     assert(build_open_meteo_forecast_url(url, sizeof(url), 49.2827, -123.1207));
     assert(std::strstr(url, "timeformat=unixtime"));
+    assert(std::strstr(url, "&daily=sunrise%2Csunset%2Cdaylight_duration%2Ctemperature_2m_max%2Ctemperature_2m_min"));
     assert(std::strstr(url, "hourly=rain%2Cshowers"));
     assert(build_open_meteo_geocoding_url(url, sizeof(url),
                                           "Vancouver, British Columbia", "ca"));

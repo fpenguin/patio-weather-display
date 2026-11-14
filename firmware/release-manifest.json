@@ -1,16 +1,16 @@
 {
   "project": "patio_weather_display",
-  "version": "1.0.26",
-  "build_time": "2026-11-14T17:09:48+09:00",
+  "version": "1.0.29",
+  "build_time": "2026-11-15T01:16:12+09:00",
   "target": "esp32s3",
   "board": "Waveshare ESP32-S3-Touch-LCD-7B documented baseline",
   "physical_board_revision_verified": false,
-  "hardware_validation": "Version 1.0.26 passed host, native LVGL, target-build and package checks. It was not flashed during release QA because the board USB serial port was disconnected.",
+  "hardware_validation": "Prior firmware 1.0.28 booted on the ESP32-S3 and reconnected to Wi-Fi. The 1.0.29 wake changes passed host input-fault, brightness, persistence and native LVGL tests. This release image was not flashed; physical wake on it is unverified.",
   "toolchain": {
     "esp_idf": "v5.5.2",
     "esp_idf_commit": "30aaf64524299d3bde422ca9a2848090d1bc5d0f",
     "python": "3.11.18",
-    "xtensa_esp_elf": "14.2.0 (esp-14.2.0_20251107)"
+    "xtensa_esp_elf": "xtensa-esp-elf-gcc (crosstool-NG esp-14.2.0_20251107) 14.2.0"
   },
   "dependencies": {
     "lvgl": "8.4.0",
@@ -27,31 +27,31 @@
     "frequency": "80m",
     "offsets": {
       "bootloader/bootloader.bin": "0x0",
+      "patio_weather_display.bin": "0x30000",
       "partition_table/partition-table.bin": "0x8000",
-      "ota_data_initial.bin": "0x11000",
-      "patio_weather_display.bin": "0x30000"
+      "ota_data_initial.bin": "0x11000"
     },
     "merged_image_offset": "0x0"
   },
   "application": {
-    "bytes": 2022016,
+    "bytes": 2080112,
     "ota_slot_bytes": 5046272,
-    "ota_free_bytes": 3024256,
-    "ota_free_percent_reported": 59,
-    "embedded_validation_sha256": "ae5ea3be2799d959c70b23b04185bb9df07a1c9e2d6631c6a00710afd5b8a29c",
-    "debug_elf_sha256": "59ef0c7afe47a830bacd37c65811db7ff4058f680c16ffca624fdcc25680beab"
+    "ota_free_bytes": 2966160,
+    "ota_free_percent_reported": 58,
+    "embedded_validation_sha256": "027a6e2aeea32f122c653db28281dc9159922ec92db65bc731d125776d798978",
+    "debug_elf_sha256": "4f2cdfa8cca867eccfcaf06c77b63468be8a39f1ce7b97a23ed0ebbeec3e5316"
   },
   "artifacts": {
-    "bootloader/bootloader.bin": "055bee35dbeba521f5a15c65a3afea395eb44df2e5a23fab00124297c7a5ad5e",
+    "bootloader/bootloader.bin": "a517214836dc2dcdb6b7df136ebc82252a392a36c3ece74a70c803b9721d0ae2",
     "ota_data_initial.bin": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f",
     "partition_table/partition-table.bin": "426f637bb6d0ca8682d784ac0ef4e545325a36e91e10554336f1d2bc576c7a5b",
-    "patio-weather-display-merged.bin": "9416fed4adc02e553b6e56189055f601eba7ae5f5b5ffa32c0da632f2de8c8d3",
-    "patio_weather_display.bin": "e6e36b1de7a9de21e28968fb071827e1fcee6fba67c6b98e1d400d965d4f2fb3"
+    "patio-weather-display-merged.bin": "5c714a55db70474f086edd0154244a9178163756c1ad9253a16f7f7b815366e6",
+    "patio_weather_display.bin": "7c67febff965b4b8b72b6a039b80a6539cb9b2723ac4c65340cc7bb76b9d73c1"
   },
   "verification": {
     "host_suites_passed": 7,
-    "core_cases_passed": 30,
-    "holiday_qa_renders": 4,
+    "core_cases_passed": 33,
+    "project_stack_frames_checked": 302,
     "project_stack_frame_limit_bytes": 4096,
     "maximum_compiled_project_frame_bytes": 2672,
     "physical_board_tested": false

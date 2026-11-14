@@ -6,6 +6,11 @@
   "timezone": "America/Vancouver",
   "timezone_abbreviation": "GMT-7",
   "elevation": 40.0,
+  "daily_units": {"time":"unixtime","sunrise":"unixtime","sunset":"unixtime","daylight_duration":"s","temperature_2m_max":"°C","temperature_2m_min":"°C"},
+  "daily": {
+    "time":[1794466800],"sunrise":[1794492660],"sunset":[1794529380],
+    "daylight_duration":[36720],"temperature_2m_max":[14],"temperature_2m_min":[6]
+  },
   "current_units": {
     "time": "unixtime",
     "interval": "seconds",

@@ -95,9 +95,15 @@ ValidationResult validate_settings(const Settings& settings) {
         coordinates.message.assign("Choose a listed screen timeout.");
         return coordinates;
     }
-    if (settings.brightness_percent > 100 || settings.dim_brightness_percent > 100) {
+    if (settings.display_rotation != 0 && settings.display_rotation != 180) {
         coordinates.valid = false;
-        coordinates.message.assign("Brightness must be between 0 and 100.");
+        coordinates.message.assign("Choose normal or 180 degree display rotation.");
+        return coordinates;
+    }
+    if (settings.brightness_percent < kMinReadingBrightness ||
+        settings.brightness_percent > 100 || settings.dim_brightness_percent > 100) {
+        coordinates.valid = false;
+        coordinates.message.assign("Reading brightness must be 1–100%; dim brightness can be 0–100%.");
         return coordinates;
     }
     if (settings.dim_start_minute < 0 || settings.dim_start_minute >= 24 * 60 ||

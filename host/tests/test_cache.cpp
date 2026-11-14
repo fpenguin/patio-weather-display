@@ -30,15 +30,21 @@ std::uint32_t crc32(const void* data, std::size_t length) {
     }
     return ~crc;
 }
-void write_legacy(const fs::path& path, const CachedSources& sources) {
+void write_legacy(const fs::path& path, const CachedSources& sources, std::uint16_t version = 1) {
+    const auto* p = reinterpret_cast<const char*>(&sources);
+    const auto daily = offsetof(CachedSources, weather) + offsetof(patio::WeatherSnapshot, days);
+    std::vector<char> old(p, p + daily);
+    old.insert(old.end(), p + daily + sizeof(sources.weather.days), p + sizeof(sources));
     struct LegacyHeader {
         std::uint32_t magic;
         std::uint16_t version, reserved;
         std::uint32_t size, crc;
-    } header{0x50415443U, 1, 0, sizeof(sources), crc32(&sources, sizeof(sources))};
+        std::uint32_t generation, header_crc;
+    } header{0x50415443U, version, 0, static_cast<std::uint32_t>(old.size()), crc32(old.data(), old.size()), 9, 0};
+    header.header_crc = crc32(&header, offsetof(LegacyHeader, header_crc));
     std::ofstream out(path, std::ios::binary);
-    out.write(reinterpret_cast<const char*>(&header), sizeof(header));
-    out.write(reinterpret_cast<const char*>(&sources), sizeof(sources));
+    out.write(reinterpret_cast<const char*>(&header), version == 2 ? sizeof(header) : offsetof(LegacyHeader, generation));
+    out.write(old.data(), old.size());
     assert(out.good());
 }
 
@@ -105,5 +111,13 @@ int main() {
     output.location.city.assign("Do not overwrite");
     assert(patio::cache_store_load(output) != ESP_OK);
     assert(output.written_utc == 777 && output.location.city == "Do not overwrite");
+    input.air_quality.display_index = patio::Optional<int>::some(75);
+    input.alerts.count = 1; input.alerts.alerts[0].short_name.assign("Coastal flooding");
+    input.weather.days[0].high_c = patio::Optional<float>::some(30);
+    write_legacy(dir / "sources-a.bin", input, 2);
+    assert(patio::cache_store_load(output) == ESP_OK && !output.weather.days[0].high_c.valid);
+    assert(output.alerts.alerts[0].short_name == "Coastal flooding" && output.air_quality.display_index.value == 75);
+    assert(patio::cache_store_save(input) == ESP_OK && patio::cache_store_load(output) == ESP_OK);
+    assert(output.weather.days[0].high_c.valid && output.weather.days[0].high_c.value == 30);
     std::cout << "Cache recovery tests passed\n";
 }

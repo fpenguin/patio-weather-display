@@ -6,6 +6,7 @@
 #include "weather/cache_store.hpp"
 #include "weather/clock_service.hpp"
 #include "weather/fixtures.hpp"
+#include "weather/gt911_report.hpp"
 #include "weather/holidays.hpp"
 #include "weather/http_client.hpp"
 #include "weather/location_lookup.hpp"
@@ -33,6 +34,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lv_adapter.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -44,6 +46,24 @@ namespace patio {
 namespace {
 
 constexpr const char* kTag = "patio_app";
+const char* reset_reason_label(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_POWERON: return "Power on";
+        case ESP_RST_BROWNOUT: return "Brownout";
+        case ESP_RST_PWR_GLITCH: return "Power glitch";
+        case ESP_RST_SW: return "Software restart";
+        case ESP_RST_EXT: return "External reset";
+        case ESP_RST_INT_WDT:
+        case ESP_RST_TASK_WDT:
+        case ESP_RST_WDT: return "Watchdog";
+        case ESP_RST_PANIC: return "Firmware panic";
+        case ESP_RST_CPU_LOCKUP: return "CPU lockup";
+        case ESP_RST_USB: return "USB reset";
+        case ESP_RST_JTAG: return "Debugger";
+        case ESP_RST_DEEPSLEEP: return "Deep sleep";
+        default: return "Other / unknown";
+    }
+}
 constexpr std::size_t kUrlCapacity = 1536;
 constexpr TickType_t kControllerPoll = pdMS_TO_TICKS(250);
 constexpr std::uint32_t kUiPumpPeriodMs = 100;
@@ -269,6 +289,7 @@ std::atomic<int> s_range_mm{-2}; // -2 offline, -1 online/no echo
 // including explicit recovery taps at an unchanged brightness.
 std::atomic<unsigned> s_frame_request{0}, s_frame_submitted{0};
 lv_indev_t* s_touch_input = nullptr;
+std::atomic<bool> s_rotate_display_180{false};
 
 class MutexGuard {
 public:
@@ -405,11 +426,9 @@ void ui_timer_callback(lv_timer_t*) {
         s_frame_submitted.store(frame);
         ESP_LOGI(kTag, "Display frame submitted: shade=%u", unsigned(shade));
     }
-    // Also check for a real GT911 contact if its edge was missed while dark.
-    portENTER_CRITICAL(&s_irq_lock);
-    const bool consuming = s_consume_wake;
-    portEXIT_CRITICAL(&s_irq_lock);
-    if ((shade || (frame & 256U) || consuming) && s_touch_input) esp_lv_adapter_touch_notify_interrupt(s_touch_input);
+    // Missed GPIO edges must not strand the first press or the final release.
+    // This only schedules a read; it never counts as activity.
+    if (s_touch_input) esp_lv_adapter_touch_notify_interrupt(s_touch_input);
     const std::int64_t diagnostics_now = esp_timer_get_time();
     static std::int64_t next_debug_sample = 0;
     if (!ui::is_debug_open(s_ui)) next_debug_sample = 0;
@@ -421,6 +440,7 @@ void ui_timer_callback(lv_timer_t*) {
         sample.brightness_percent = s_applied_brightness.load();
         sample.auto_off_seconds = s_power_config.load() >> 16;
         sample.uptime_seconds = diagnostics_now / 1000000;
+        sample.reset_reason = reset_reason_label(esp_reset_reason());
         sample.free_internal_kib = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024;
         sample.free_psram_kib = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024;
         clock_service_now_utc(sample.utc);
@@ -734,6 +754,7 @@ void publish_dashboard() {
         s_runtime->settings.thresholds,
         s_runtime->settings.uv_advice_enabled,
         s_runtime->settings.convenience_advice_enabled,
+        s_runtime->settings.clock_24_hour,
     };
     dashboard.advice = choose_advice(advice_input);
 
@@ -1738,6 +1759,7 @@ void handle_ui_command(ui::UiCommand& command) {
             Settings next = command.settings;
             next.aqhi_community_id = s_runtime->settings.aqhi_community_id;
             next.aqhi_community = s_runtime->settings.aqhi_community;
+            next.settings_reserved = 0;
             const ValidationResult validation = validate_settings(next);
             if (!validation.valid) {
                 publish_settings_save_result(false, validation.message.c_str());
@@ -1751,6 +1773,8 @@ void handle_ui_command(ui::UiCommand& command) {
                 publish_settings_save_result(false, message);
                 break;
             }
+            const bool orientation_changed =
+                next.display_rotation != s_runtime->settings.display_rotation;
             s_runtime->settings = next;
             s_runtime->location_search_cache_valid = false;
             publish_settings();
@@ -1761,7 +1785,15 @@ void handle_ui_command(ui::UiCommand& command) {
                     : s_runtime->dashboard_build.local_now.valid
                           ? &s_runtime->dashboard_build.local_now
                     : nullptr);
-            publish_settings_save_result(true, "Settings saved");
+            publish_settings_save_result(true, orientation_changed
+                ? "Orientation saved; restarting display"
+                : "Settings saved");
+            if (orientation_changed) {
+                ESP_LOGI(kTag, "Display orientation changed to %u degrees; restarting",
+                         static_cast<unsigned>(next.display_rotation));
+                vTaskDelay(pdMS_TO_TICKS(500));
+                esp_restart();
+            }
             break;
         }
         default:
@@ -1803,9 +1835,10 @@ void display_power_task(void*) {
         last_sample = sample;
         const bool touch = events & (kTouchEdge | kContact);
         const bool was_dark = policy.dark;
-        policy.update(now, cfg >> 16, s_dashboard_visible.load(), touch, range);
+        const bool dashboard = s_dashboard_visible.load();
+        policy.update(now, cfg >> 16, dashboard, touch, range);
         const uint8_t normal = cfg & 255, scheduled = (cfg >> 8) & 255;
-        const auto desired = policy.brightness(now, normal, scheduled);
+        const auto desired = policy.brightness(now, normal, scheduled, dashboard);
         const int led = desired ? std::max(normal,desired) : 0;
         const unsigned visual = led ? (led - desired) * 255U / led : (256U | LV_OPA_COVER);
         if (touch && was_dark)
@@ -2066,36 +2099,68 @@ void IRAM_ATTR touch_interrupt(esp_lcd_touch_handle_t, void*) {
 // Called by the LVGL input worker, not the GPIO ISR.
 esp_err_t read_touch(esp_lcd_touch_handle_t touch, esp_lcd_touch_point_data_t* points,
                      uint8_t* count, uint8_t capacity, void*) {
+    if (!touch || !points || !count || !capacity) return ESP_ERR_INVALID_ARG;
     *count = 0;
-    auto err = esp_lcd_touch_read_data(touch);
-    if (err == ESP_OK) err = esp_lcd_touch_get_data(touch, points, count, capacity);
-    if (err == ESP_OK) {
-        if (*count) {
-            if (auto task = s_power_task.load()) xTaskNotify(task, kContact, eSetBits);
-        }
-        // If an IRQ beats the LVGL scan, consume the gesture through release.
-        // A short grace interval covers an initial empty scan before touchdown.
-        static int64_t suppress_until = 0;
-        const auto now = esp_timer_get_time();
-        portENTER_CRITICAL(&s_irq_lock);
-        if (*count && s_irq_mode == 2) s_consume_wake = true;
-        if (s_consume_wake) {
-            if (!suppress_until || *count) suppress_until = now + 100000;
-            if (!*count && now >= suppress_until) {
-                suppress_until = 0;
-                s_consume_wake = false;
-            }
-            *count = 0;
-        }
-        portEXIT_CRITICAL(&s_irq_lock);
+    static Gt911Pointer pointer; // LVGL is the sole reader and acknowledger
+    using E = Gt911Pointer::Event;
+    esp_err_t err = ESP_OK;
+    const auto event = pointer.poll(
+        [&](uint16_t reg, uint8_t* dst, size_t size) {
+            err = esp_lcd_panel_io_rx_param(touch->io, reg, dst, size);
+            return err == ESP_OK;
+        }, [&](uint16_t reg) {
+            const uint8_t zero = 0;
+            err = esp_lcd_panel_io_tx_param(touch->io, reg, &zero, 1);
+            return err == ESP_OK;
+        });
+    const auto now = esp_timer_get_time();
+    static int64_t next_error_log = 0, suppress_until = 0;
+    if (event == E::IoError && now >= next_error_log) {
+        ESP_LOGW(kTag, "GT911 read: %s; retrying", esp_err_to_name(err));
+        next_error_log = now + 5000000;
     }
-    return err;
+    // Arm suppression BEFORE notifying the faster power task. Otherwise a
+    // polled contact can turn on the LEDs, disarm wake, then click Settings.
+    portENTER_CRITICAL(&s_irq_lock);
+    if (event == E::Contact && s_irq_mode == 2) s_consume_wake = true;
+    const bool consume = s_consume_wake;
+    if (consume) {
+        if (!suppress_until || event == E::Contact) suppress_until = now + 100000;
+        if (event == E::Release || (event == E::NoReport && !pointer.down && now >= suppress_until)) {
+            s_consume_wake = false;
+            suppress_until = 0;
+        }
+    }
+    const bool keep_polling = s_irq_mode != 0 || consume || pointer.down;
+    portEXIT_CRITICAL(&s_irq_lock);
+    if (event == E::Contact) {
+        if (auto task = s_power_task.load()) xTaskNotify(task, kContact, eSetBits);
+    }
+    if (keep_polling && s_touch_input) esp_lv_adapter_touch_notify_interrupt(s_touch_input);
+    // No-report and transient error preserve LVGL's pointer state, but cannot
+    // wake the display or renew the idle timer with old coordinates.
+    if (pointer.down && !consume) {
+        const auto& p = pointer.point;
+        const uint16_t x = std::min<uint16_t>(p.x, BOARD_7B_LCD_H_RES - 1);
+        const uint16_t y = std::min<uint16_t>(p.y, BOARD_7B_LCD_V_RES - 1);
+        const bool rotated = s_rotate_display_180.load(std::memory_order_relaxed);
+        points[0].x = rotated ? BOARD_7B_LCD_H_RES - 1 - x : x;
+        points[0].y = rotated ? BOARD_7B_LCD_V_RES - 1 - y : y;
+        points[0].strength = p.strength;
+        points[0].track_id = p.id;
+        *count = 1;
+    }
+    return ESP_OK;
 }
 
 void initialize_display() {
     esp_lcd_panel_handle_t panel = nullptr;
     esp_lcd_touch_handle_t touch = nullptr;
-    ESP_ERROR_CHECK(board_7b_init(&panel, &touch));
+    const bool rotate_180 = s_runtime->settings.display_rotation == 180;
+    const auto rotation = rotate_180
+        ? ESP_LV_ADAPTER_ROTATE_180
+        : ESP_LV_ADAPTER_ROTATE_0;
+    ESP_ERROR_CHECK(board_7b_init(&panel, &touch, rotation));
     ESP_ERROR_CHECK(board_7b_backlight(false));
 
     esp_lv_adapter_config_t adapter = ESP_LV_ADAPTER_DEFAULT_CONFIG();
@@ -2106,7 +2171,8 @@ void initialize_display() {
     display_config.panel = panel;
     display_config.panel_io = nullptr;
     display_config.profile.interface = ESP_LV_ADAPTER_PANEL_IF_RGB;
-    display_config.profile.rotation = BOARD_7B_LVGL_ROTATION;
+    s_rotate_display_180.store(rotate_180, std::memory_order_relaxed);
+    display_config.profile.rotation = rotation;
     display_config.profile.hor_res = BOARD_7B_LCD_H_RES;
     display_config.profile.ver_res = BOARD_7B_LCD_V_RES;
     display_config.profile.buffer_height = 50;
@@ -2211,6 +2277,7 @@ void create_runtime_tasks() {
 
 extern "C" void app_main(void) {
     using namespace patio;
+    ESP_LOGI(kTag, "Last restart: %s", reset_reason_label(esp_reset_reason()));
     void* memory = heap_caps_calloc(1, sizeof(Runtime),
                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!memory) memory = heap_caps_calloc(1, sizeof(Runtime), MALLOC_CAP_8BIT);

@@ -11,6 +11,7 @@ namespace ui {
 enum class IconKind : std::uint8_t {
     settings_sliders,
     sun,
+    horizon,
     partly_cloudy,
     cloud,
     moon,

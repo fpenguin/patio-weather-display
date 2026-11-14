@@ -14,6 +14,7 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_rgb.h"
+#include "esp_lcd_panel_io_interface.h"
 #include "esp_lcd_touch_gt911.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -54,10 +55,11 @@ static esp_err_t configure_touch_irq(void)
     return gpio_set_level(GPIO_NUM_4, 0);
 }
 
-static esp_err_t create_rgb_panel(esp_lcd_panel_handle_t *panel)
+static esp_err_t create_rgb_panel(esp_lcd_panel_handle_t *panel,
+                                  esp_lv_adapter_rotation_t rotation)
 {
     const uint8_t frame_buffers = esp_lv_adapter_get_required_frame_buffer_count(
-        BOARD_7B_LVGL_TEAR_MODE, BOARD_7B_LVGL_ROTATION);
+        BOARD_7B_LVGL_TEAR_MODE, rotation);
 
     const esp_lcd_rgb_panel_config_t config = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
@@ -102,15 +104,36 @@ static esp_err_t create_rgb_panel(esp_lcd_panel_handle_t *panel)
     return esp_lcd_panel_init(*panel);
 }
 
+// The IDF generic LCD I2C transport waits indefinitely. The touch callback
+// runs on the LVGL task, so use bounded register transfers even if the bus
+// is stuck. This board owns one GT911 for its entire lifetime.
+#define TOUCH_IO_TIMEOUT_MS 35
+static i2c_master_dev_handle_t s_touch_dev;
+static esp_err_t touch_read_reg(esp_lcd_panel_io_t *io, int reg, void *data, size_t size)
+{
+    (void)io;
+    if (reg < 0 || reg > UINT16_MAX || !data || !size) return ESP_ERR_INVALID_ARG;
+    const uint8_t addr[] = {(uint8_t)(reg >> 8), (uint8_t)reg};
+    return i2c_master_transmit_receive(s_touch_dev, addr, sizeof(addr), data, size, TOUCH_IO_TIMEOUT_MS);
+}
+
+static esp_err_t touch_write_reg(esp_lcd_panel_io_t *io, int reg, const void *data, size_t size)
+{
+    (void)io;
+    if (reg < 0 || reg > UINT16_MAX || !data || size != 1) return ESP_ERR_INVALID_ARG;
+    const uint8_t tx[] = {(uint8_t)(reg >> 8), (uint8_t)reg, *(const uint8_t *)data};
+    return i2c_master_transmit(s_touch_dev, tx, sizeof(tx), TOUCH_IO_TIMEOUT_MS);
+}
+
 static esp_err_t create_touch(i2c_master_bus_handle_t bus,
                               esp_lcd_touch_handle_t *touch)
 {
-    esp_lcd_panel_io_i2c_config_t io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-    io_config.scl_speed_hz = BOARD_7B_I2C_FREQUENCY_HZ;
-
-    esp_lcd_panel_io_handle_t io = NULL;
-    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c(bus, &io_config, &io), TAG,
-                        "failed to create GT911 I2C panel I/O");
+    static esp_lcd_panel_io_t io = {.rx_param = touch_read_reg, .tx_param = touch_write_reg};
+    const i2c_device_config_t dev = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
+        .scl_speed_hz = BOARD_7B_I2C_FREQUENCY_HZ,
+    };
+    ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(bus, &dev, &s_touch_dev), TAG, "add GT911");
 
     const esp_lcd_touch_config_t config = {
         .x_max = BOARD_7B_LCD_H_RES,
@@ -127,11 +150,17 @@ static esp_err_t create_touch(i2c_master_bus_handle_t bus,
             .mirror_y = 0,
         },
     };
-    return esp_lcd_touch_new_i2c_gt911(io, &config, touch);
+    esp_err_t err = esp_lcd_touch_new_i2c_gt911(&io, &config, touch);
+    if (err != ESP_OK) {
+        i2c_master_bus_rm_device(s_touch_dev);
+        s_touch_dev = NULL;
+    }
+    return err;
 }
 
 esp_err_t board_7b_init(esp_lcd_panel_handle_t *panel,
-                        esp_lcd_touch_handle_t *touch)
+                        esp_lcd_touch_handle_t *touch,
+                        esp_lv_adapter_rotation_t rotation)
 {
     ESP_RETURN_ON_FALSE(panel != NULL && touch != NULL, ESP_ERR_INVALID_ARG,
                         TAG, "panel/touch output is null");
@@ -142,7 +171,7 @@ esp_err_t board_7b_init(esp_lcd_panel_handle_t *panel,
     *touch = NULL;
 
     ESP_LOGI(TAG, "initializing 1024x600 RGB565 panel at 30.85 MHz");
-    ESP_RETURN_ON_ERROR(create_rgb_panel(panel), TAG, "RGB panel init failed");
+    ESP_RETURN_ON_ERROR(create_rgb_panel(panel, rotation), TAG, "RGB panel init failed");
 
     i2c_master_bus_handle_t bus = NULL;
     ESP_RETURN_ON_ERROR(board_7b_i2c_init(&bus), TAG, "I2C init failed");

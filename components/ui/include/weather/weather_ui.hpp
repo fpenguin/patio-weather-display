@@ -120,6 +120,7 @@ struct DebugReadings {
     unsigned free_internal_kib{};
     unsigned free_psram_kib{};
     unsigned uptime_seconds{};
+    const char* reset_reason{"Unknown"}; // Static label, read immediately by update_debug.
     std::int64_t utc{};
     std::int64_t last_sync_utc{};
 };

@@ -822,6 +822,9 @@ ParseResult parse_open_meteo_weather(const char* json,
         return result(ParseCode::InvalidSchema, "Open-Meteo hourly.time is empty");
     }
     const int count = std::min(returned_count, static_cast<int>(snapshot.hours.size()));
+    std::int64_t previous_end = 0;
+    Optional<float> prior_temperature, prior_apparent, prior_wind;
+    Optional<int> prior_code;
     for (int index = 0; index < count; ++index) {
         const cJSON* time = cJSON_GetArrayItem(times, index);
         if (!cJSON_IsNumber(time) || !std::isfinite(time->valuedouble) ||
@@ -837,23 +840,72 @@ ParseResult parse_open_meteo_weather(const char* json,
         sample.showers_mm = float_at(showers, index, schema_error);
         sample.snowfall_cm = float_at(snowfall, index, schema_error);
         sample.precipitation_probability_percent = float_at(probability, index, schema_error);
+        // Accumulations and maximum gusts belong to [T-1h,T). Instantaneous
+        // values at T instead describe the start of the following interval.
+        const bool adjacent = index > 0 && previous_end == sample.interval_start_utc;
         sample.temperature_c = float_at(temperatures, index, schema_error);
         sample.apparent_temperature_c = float_at(apparent, index, schema_error);
         sample.wind_kmh = float_at(wind, index, schema_error);
         sample.gust_kmh = float_at(gusts, index, schema_error);
-        sample.uv_index = float_at(uv, index, schema_error);
+        sample.uv_index = float_at(uv, index, schema_error); // Preceding-hour mean, like gust maxima.
         sample.weather_code = int_at(codes, index, schema_error);
+        if (index && end <= previous_end) return result(ParseCode::InvalidSchema, "Unordered hourly timestamps");
+        previous_end = end;
         sample.kind = end <= fetched_time_utc ? HourKind::HistoricalForecast : HourKind::Forecast;
         if (!sane_weather_sample(sample)) {
             return result(ParseCode::InvalidSchema,
                           "Open-Meteo hourly value is outside a safe range");
         }
+        // Validate every source value, including the last instantaneous sample,
+        // before retaining it for the next contiguous interval.
+        auto shift = [adjacent](auto& current, auto& prior) {
+            const auto saved = current;
+            if (adjacent) current = prior; else current = {};
+            prior = saved;
+        };
+        shift(sample.temperature_c, prior_temperature); shift(sample.apparent_temperature_c, prior_apparent);
+        shift(sample.wind_kmh, prior_wind); shift(sample.weather_code, prior_code);
         snapshot.hours[static_cast<std::size_t>(index)] = sample;
     }
     if (schema_error) {
         return result(ParseCode::InvalidSchema, "Open-Meteo hourly array contains a malformed value");
     }
     snapshot.hour_count = static_cast<std::size_t>(count);
+    const auto* daily = member(root, "daily");
+    if (daily && !cJSON_IsNull(daily)) {
+        const auto* keys = member(daily, "time");
+        const cJSON *hi, *lo, *rise, *set, *duration;
+        if (!cJSON_IsArray(keys) ||
+            !validate_optional_array(daily, "temperature_2m_max", hi) ||
+            !validate_optional_array(daily, "temperature_2m_min", lo) ||
+            !validate_optional_array(daily, "sunrise", rise) ||
+            !validate_optional_array(daily, "sunset", set) ||
+            !validate_optional_array(daily, "daylight_duration", duration))
+            return result(ParseCode::InvalidSchema, "Malformed daily forecast");
+        const auto* du = member(root, "daily_units");
+        if (!unit_is(du, "temperature_2m_max", "°C") || !unit_is(du, "temperature_2m_min", "°C") ||
+            !unit_is(du, "daylight_duration", "s"))
+            return result(ParseCode::UnsupportedUnits, "Unexpected daily forecast units");
+        const int n = std::min(cJSON_GetArraySize(keys), static_cast<int>(snapshot.days.size()));
+        for (int i = 0; i < n; ++i) {
+            auto& day = snapshot.days[i];
+            // This firmware's zone database covers 2024–2037 (int32 epochs).
+            const auto key = int_at(keys, i, schema_error);
+            if (!key.valid) continue;
+            day.anchor_utc = static_cast<std::int64_t>(key.value) + 12 * 3600;
+            day.sunrise_utc = int_at(rise, i, schema_error).value;
+            day.sunset_utc = int_at(set, i, schema_error).value;
+            day.high_c = float_at(hi, i, schema_error);
+            day.low_c = float_at(lo, i, schema_error);
+            day.daylight_seconds = float_at(duration, i, schema_error);
+            if ((day.high_c.valid && (day.high_c.value < -150 || day.high_c.value > 100)) ||
+                (day.low_c.valid && (day.low_c.value < -150 || day.low_c.value > 100)) ||
+                (day.high_c.valid && day.low_c.valid && day.high_c.value < day.low_c.value) ||
+                (day.daylight_seconds.valid && (day.daylight_seconds.value < 0 || day.daylight_seconds.value > 86400)))
+                schema_error = true;
+        }
+        if (schema_error) return result(ParseCode::InvalidSchema, "Invalid daily forecast value");
+    }
     snapshot.status.detail.assign(returned_count > count
                                       ? "Open-Meteo model data (bounded to 72 hours)"
                                       : "Open-Meteo model data");
@@ -1339,6 +1391,7 @@ bool build_open_meteo_forecast_url(char* output,
     writer.append_format("?latitude=%.6f&longitude=%.6f", latitude, longitude);
     writer.append("&current=temperature_2m%2Capparent_temperature%2Cweather_code%2Cwind_speed_10m%2Cwind_gusts_10m");
     writer.append("&hourly=rain%2Cshowers%2Csnowfall%2Cprecipitation_probability%2Cweather_code%2Ctemperature_2m%2Capparent_temperature%2Cwind_speed_10m%2Cwind_gusts_10m%2Cuv_index");
+    writer.append("&daily=sunrise%2Csunset%2Cdaylight_duration%2Ctemperature_2m_max%2Ctemperature_2m_min");
     writer.append("&timezone=auto&timeformat=unixtime&past_days=1&forecast_days=2");
     writer.append("&temperature_unit=celsius&wind_speed_unit=kmh&precipitation_unit=mm");
     return writer.good();

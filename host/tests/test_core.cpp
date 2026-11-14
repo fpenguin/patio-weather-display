@@ -1,10 +1,12 @@
 #include "weather/advice.hpp"
+#include "weather/gt911_report.hpp"
 #include "weather/proximity.hpp"
 #include "weather/location_lookup.hpp"
 #include "weather/fixtures.hpp"
 #include "weather/holidays.hpp"
 #include "weather/rainfall.hpp"
 #include "weather/time_zone.hpp"
+#include "weather/timeline.hpp"
 #include "weather/validation.hpp"
 
 #include <cmath>
@@ -229,10 +231,19 @@ TEST(settings_validation_rejects_corrupt_persisted_values) {
     settings.location.time_zone.assign("America/Vancouver");
     settings.brightness_percent = 101;
     CHECK(!validate_settings(settings).valid);
+    settings.brightness_percent = 0;
+    CHECK(!validate_settings(settings).valid);
+    settings.brightness_percent = kMinReadingBrightness;
+    settings.dim_brightness_percent = 0; // night may be black; wake must be visible
+    CHECK(validate_settings(settings).valid);
     settings.brightness_percent = 80;
     settings.dim_start_minute = 24 * 60;
     CHECK(!validate_settings(settings).valid);
     settings.dim_start_minute = 22 * 60;
+    settings.display_rotation = 90;
+    CHECK(!validate_settings(settings).valid);
+    settings.display_rotation = 180;
+    CHECK(validate_settings(settings).valid);
     settings.location.latitude = std::numeric_limits<double>::quiet_NaN();
     CHECK(!validate_settings(settings).valid);
 }
@@ -500,12 +511,12 @@ TEST(dry_banner_yields_to_active_advisories_and_statements) {
 TEST(rain_advice_formats_both_endpoints_and_midnight) {
     struct Scenario { int first; int end; const char* expected; };
     const Scenario scenarios[] = {
-        {9, 11, "Rain expected around 9 AM to 11 AM"},
-        {11, 13, "Rain expected around 11 AM to 1 PM"},
-        {11, 12, "Rain expected around 11 AM to noon"},
-        {12, 14, "Rain expected around noon to 2 PM"},
-        {23, 24, "Rain expected around 11 PM to midnight"},
-        {0, 1, "Rain expected around midnight to 1 AM"},
+        {9, 11, "Waterproof layer • Rain 9–11 AM"},
+        {11, 13, "Waterproof layer • Rain 11 AM–1 PM"},
+        {11, 12, "Waterproof layer • Rain 11 AM–12 PM"},
+        {12, 14, "Waterproof layer • Rain 12–2 PM"},
+        {23, 24, "Waterproof layer • Rain 11 PM–midnight"},
+        {0, 1, "Waterproof layer • Rain 12–1 AM"},
     };
     for (const auto& scenario : scenarios) {
         WeatherSnapshot weather{};
@@ -523,6 +534,49 @@ TEST(rain_advice_formats_both_endpoints_and_midnight) {
     }
 }
 
+TEST(daylight_uses_local_dates_and_real_events) {
+    WeatherSnapshot w{}; w.status.state=SourceState::Fresh;
+    // DST ends in New York on Nov 1. The provider's daily anchor is based
+    // on its request offset; solar event instants use the actual named zone.
+    auto& d=w.days[1];
+    d.anchor_utc=utc_epoch(2026,11,1,16);
+    d.sunrise_utc=utc_epoch(2026,11,1,11,25);
+    d.sunset_utc=utc_epoch(2026,11,1,21,59);
+    d.high_c=Optional<float>::some(20);
+    CivilTime t{}; CHECK(utc_to_local("America/New_York",d.anchor_utc,t));
+    auto day=day_summary(w,t,"America/New_York");
+    CHECK(day.rise==6*60+25 && day.set==16*60+59 && day.high_c.valid && !day.low_c.valid);
+    ++t.day;
+    CHECK(!day_summary(w,t,"America/New_York").high_c.valid);
+    CHECK(utc_to_local("Asia/Kathmandu",d.anchor_utc,t));
+    day=day_summary(w,t,"Asia/Kathmandu");
+    CHECK(day.rise==17*60+10 && day.set==-1 && day.sun==DaySummary::Unknown);
+    d.daylight_seconds=Optional<float>::some(86400);
+    CHECK(day_summary(w,t,"Asia/Kathmandu").sun==DaySummary::PolarDay);
+    d.daylight_seconds.value=0;
+    CHECK(day_summary(w,t,"Asia/Kathmandu").sun==DaySummary::PolarNight);
+    w.status.state=SourceState::Unavailable;
+    CHECK(day_summary(w,t,"Asia/Kathmandu").sun==DaySummary::Unknown);
+}
+
+TEST(dressing_advice_and_wind_share_timed_intervals) {
+    auto m=make_fixture(FixtureId::MinimalRain);
+    CHECK(m.advice.supporting=="Waterproof layer • Rain 11 AM–5 PM • Strong wind 2–5 PM");
+    AdviceInput in{&m.weather,&m.air_quality,&m.alerts,m.now_utc,m.weather.hours[17].interval_end_utc};
+    in.clock_24_hour=true;
+    CHECK(choose_advice(in).supporting=="Waterproof layer • Rain 11:00–17:00 • Strong wind 14:00–17:00");
+    auto& hour=m.weather.hours[8];
+    CHECK(wind_exposure(hour)==Exposure::Strong);
+    hour.weather_code=Optional<int>::some(99);
+    CHECK(outdoor_exposure(hour)==Exposure::Hail && choose_advice(in).kind==AdviceKind::Thunderstorm);
+    CHECK(wind_exposure(HourlyWeather{})==Exposure::Unknown);
+    auto dry=make_fixture(FixtureId::OrdinaryDry);
+    in.weather=&dry.weather; in.now_utc=dry.now_utc; in.air_quality=&dry.air_quality;
+    CHECK(choose_advice(in).headline=="Pack a light layer");
+    dry.air_quality.scale.assign("US AQI"); dry.air_quality.display_index.value=173;
+    CHECK(choose_advice(in).kind==AdviceKind::PoorAirQuality);
+}
+
 TEST(rain_advice_uses_next_contiguous_window) {
     WeatherSnapshot weather{};
     weather.status.state = SourceState::Fresh;
@@ -534,15 +588,15 @@ TEST(rain_advice_uses_next_contiguous_window) {
         sample.local_start_minute = index * 60;
         sample.local_end_minute = (index + 1) * 60;
     }
-    CHECK(choose(&weather, 8 * 3600).supporting == "Rain expected around 9 AM to 11 AM");
-    CHECK(choose(&weather, 11 * 3600).supporting == "Rain expected around 3 PM to 5 PM");
+    CHECK(choose(&weather, 8 * 3600).supporting == "Waterproof layer • Rain 9–11 AM");
+    CHECK(choose(&weather, 11 * 3600).supporting == "Waterproof layer • Rain 3–5 PM");
     // A gap in source data is not permission to join two windows.
     weather.hours[10].rain_mm = Optional<float>::none();
-    CHECK(choose(&weather, 8 * 3600).supporting == "Rain expected around 9 AM to 10 AM");
+    CHECK(choose(&weather, 8 * 3600).supporting == "Waterproof layer • Rain 9–10 AM");
     // A clock resync backwards recomputes the next window; no cached window
     // from the previous call survives.
-    CHECK(choose(&weather, 16 * 3600).supporting == "Rain expected around 4 PM to 5 PM");
-    CHECK(choose(&weather, 8 * 3600).supporting == "Rain expected around 9 AM to 10 AM");
+    CHECK(choose(&weather, 16 * 3600).supporting == "Waterproof layer • Rain 4–5 PM");
+    CHECK(choose(&weather, 8 * 3600).supporting == "Waterproof layer • Rain 9–10 AM");
 }
 
 TEST(ongoing_rain_hour_does_not_become_dry_after_proration) {
@@ -561,7 +615,7 @@ TEST(ongoing_rain_hour_does_not_become_dry_after_proration) {
     CHECK_NEAR(amount.millimetres, 1.0F / 6.0F, 0.001F);
     const Advice advice = choose(&weather, now);
     CHECK(advice.kind == AdviceKind::Rain);
-    CHECK(advice.supporting == "Rain expected around 4 PM to 5 PM");
+    CHECK(advice.supporting == "Waterproof layer • Rain 4–5 PM");
     CHECK(choose(&weather, 17 * 3600 - 1).kind == AdviceKind::Rain);
     CHECK(choose(&weather, 17 * 3600).kind == AdviceKind::Dry);
     weather.hours[0].gust_kmh = Optional<float>::some(70.0F);
@@ -760,11 +814,51 @@ TEST(touch_only_dashboard_sleeps_and_wakes_with_no_sensor) {
     }
 }
 
+TEST(polled_gt911_wakes_once_without_an_irq_and_never_acks_an_empty_poll) {
+    using E = Gt911Pointer::Event;
+    Gt911Pointer pointer;
+    ProximityDisplay power;
+    std::uint8_t status = 0;
+    bool payload_ok = true, ack_ok = true, status_ok = true;
+    unsigned acks = 0, payloads = 0;
+    auto poll = [&](int ms) {
+        auto event = pointer.poll([&](unsigned reg, std::uint8_t* out, unsigned size) {
+            if (reg == 0x814e) { CHECK(size == 1); *out = status; return status_ok; }
+            CHECK(reg == 0x814f && size == 8); ++payloads;
+            const std::uint8_t report[] = {2, 0xfd, 0x03, 0x37, 0x02, 5, 0, 0};
+            std::memcpy(out, report, sizeof(report));
+            return payload_ok;
+        }, [&](unsigned reg) {
+            CHECK(reg == 0x814e); ++acks; if (ack_ok) status = 0; return ack_ok;
+        });
+        power.update(ms, 30, true, event == E::Contact, RangeSample::Offline);
+        return event;
+    };
+    CHECK(poll(30000) == E::NoReport && acks == 0 && power.dark);
+    status = 0x81; status_ok = false;
+    CHECK(poll(30100) == E::IoError && !pointer.down && !acks && power.dark);
+    status_ok = true; payload_ok = false;
+    CHECK(poll(30200) == E::IoError && !pointer.down && !acks && power.dark);
+    payload_ok = true; ack_ok = false;
+    CHECK(poll(30300) == E::IoError && !pointer.down && power.dark);
+    ack_ok = true;
+    CHECK(poll(30400) == E::Contact && pointer.down && !power.dark);
+    CHECK(pointer.point.x == 1021 && pointer.point.y == 567 && pointer.point.id == 2);
+    CHECK(poll(39900) == E::NoReport && pointer.down && acks == 2);
+    status = 0x80;
+    CHECK(poll(40000) == E::Release && !pointer.down && acks == 3);
+    CHECK(poll(60400) == E::NoReport && power.dark); // cached press did not extend the timer
+    status = 0x86;
+    CHECK(poll(60500) == E::Invalid && acks == 4 && payloads == 3 && power.dark);
+    status = 0x81;
+    CHECK(poll(60600) == E::Contact && !power.dark && pointer.down);
+}
+
 TEST(touch_temporarily_restores_reading_brightness) {
     ProximityDisplay p{};
     auto tick = [&](int t, int timeout, bool touch=false) {
         p.update(t, timeout, true, touch, RangeSample::Offline);
-        return p.brightness(t, 80, 25);
+        return p.brightness(t, 80, 25, true);
     };
     CHECK(tick(0,60)==25); // scheduled dim, still visible
     CHECK(tick(500,60,true)==80);
@@ -773,14 +867,20 @@ TEST(touch_temporarily_restores_reading_brightness) {
     CHECK(tick(61000,60,true)==80); // wake from off at night
     CHECK(tick(62000,0,true)==80); // Never: eventually dim, never switch off
     CHECK(tick(121999,0)==80 && tick(122000,0)==25);
-    CHECK(p.brightness(122000,80,80)==80);
+    CHECK(p.brightness(122000,80,80,true)==80);
+    p.update(122001,30,false,false,RangeSample::Offline);
+    CHECK(p.brightness(122001,80,0,false)==80); // a zero night schedule cannot black out setup
+    p.update(122002,30,true,false,RangeSample::Offline);
+    CHECK(p.brightness(122002,80,0,true)==0);
+    p.update(122003,30,true,true,RangeSample::Offline);
+    CHECK(p.brightness(122003,80,0,true)==80);
 }
 
 TEST(approach_extends_one_uninterrupted_reading_session) {
     ProximityDisplay p{};
     auto step = [&](int ms, RangeSample s, bool tap=false) {
         p.update(ms, 30, true, tap, s);
-        return p.brightness(ms,85,25);
+        return p.brightness(ms,85,25,true);
     };
     CHECK(step(30000,RangeSample::Offline)==0);
     CHECK(step(30010,RangeSample::Waiting,true)==85);

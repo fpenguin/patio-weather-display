@@ -4,17 +4,17 @@ Dedicated native ESP-IDF/LVGL firmware for the **Waveshare ESP32-S3-Touch-LCD-7B
 
 The firmware is not a screenshot or browser shell. The dashboard, chart, icons, settings, keyboards, candidate lists, and warning banners are LVGL 8 objects drawn by the ESP32-S3.
 
-[International release QA and screenshots](docs/international-qa.md)
+[Download firmware v1.0.29](https://github.com/fpenguin/patio-weather-display/releases/tag/v1.0.29) · [Release notes](RELEASE_NOTES.md) · [International QA](docs/international-qa.md)
 
-![Patio Weather Display dashboard](screenshots/release-qa/board-dashboard.png)
+![Rainy-day dashboard with hourly precipitation and a clothing recommendation](screenshots/dashboard/rain.png)
 
 The repository is public for inspection and release distribution. No license has yet been granted for the project's original source code. Third-party components retain the licenses listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## What is implemented
 
-- Large local clock/date, outside temperature, feels-like value, regional air-quality badge, settings affordance, and a single stable bottom advice banner.
-- One proportional 6 AM-midnight forecast axis with 1/3, 1/6, 1/6, 1/3 day sections, a minute-updated time badge below the axis, individually dimmed elapsed rain bars, direct rain labels, and stable 3/6/12/24/48/96 mm scale steps.
-- Open-Meteo current/hourly weather. Hourly liquid rain is `rain + showers` over the documented preceding `[T-3600,T)` interval. Snowfall remains separate; probability is never multiplied into an amount.
+- Local date and clock, outside temperature, feels-like, today’s high/low, and regional air quality. One bottom banner recommends what to wear or shows a higher-priority warning.
+- One 6 AM–midnight timeline: hourly ticks, labels every three hours, local daylight in gold, and a bright cyan marker at the current minute. Muted rain (mm) and snow (cm) bars rise from this rail; a dry high-UV window uses the same lane. The strip below shows light, breezy, or strong wind; storm or hail risk takes precedence for the affected hours.
+- Open-Meteo current, hourly and daily weather. Each liquid bar is `rain + showers` for `[T-3600,T)`. Snow depth added during that hour is plotted separately, never converted to rain or multiplied by probability. Bars use stable scale steps (3/6/12/24/48/96 in the displayed unit); capped bars retain their amount label. Sunrise, sunset and the full-day high/low come from the daily forecast for the configured location and local date.
 - ECCC Canadian AQHI with explicit nearest-community selection and source observation time. AQHI 10+ is preserved. High AQHI alone is described as poor air quality, not wildfire smoke.
 - ECCC official alerts filtered with a geographic point intersection. Alert type, timing, IDs, impact, and feed-failure/cached-alert state are retained independently of weather and AQHI.
 - Deterministic advice for dry, rain, heavy rain, strong wind, ice, snow, thunderstorm risk, heat, cold, poor air quality, high UV, unavailable weather, and applicable official alerts.
@@ -168,7 +168,7 @@ esptool.py --chip esp32s3 -p /dev/cu.wchusbserialXXXX write_flash 0x0 build/pati
 ```
 
 For the packaged release bundle, run the same command from `firmware/` with
-`patio-weather-display-merged.bin` (without the `build/` prefix).
+`patio-weather-display-merged.bin` (without the `build/` prefix). The merged image writes erased padding across the settings area; use the application-only image for an update that preserves settings on the matching layout. See [release notes](RELEASE_NOTES.md) for the two downloads.
 
 Prefer `idf.py flash`; it is harder to misuse.
 
@@ -209,7 +209,7 @@ the native touchscreen keyboard; this firmware does not provide a QR portal.
 
 **Settings → Debug mode** shows live Wi-Fi signal in dBm, VL53L0X distance in millimetres, weather status and last fetch/error, clock synchronization, brightness, timeout, uptime and free memory. Opening it does not start a Wi-Fi scan or refresh the forecast.
 
-Settings contains Location & time, Holidays, Air quality & alerts, Display & units, Wi-Fi, and Data & about. Celsius and millimetres are the required presentation. Brightness uses the board expander's inverted PWM register; scheduled dimming uses the selected location's named-zone local time.
+Settings contains Location & time, Holidays, Air quality & alerts, Display & units, Wi-Fi, and Data & about. **Display & units → Orientation** offers normal and 180-degree landscape mounting; confirming a changed orientation restarts the display once and rotates touch coordinates with the image. Existing installations remain in normal orientation. Celsius and millimetres are the required presentation. Brightness uses the board expander's inverted PWM register; scheduled dimming uses the selected location's named-zone local time.
 
 ## Live providers and policies
 
@@ -248,7 +248,7 @@ an ECCC guarantee that the community represents conditions at your exact
 location. The community label includes its distance. Outside this limit, AQHI
 is shown as unavailable instead of borrowing a distant reading.
 
-When the dashboard would otherwise say “No umbrella needed,” it shows the highest-priority active official alert instead. The badge counts only other active alerts. The bottom banner uses one line of supporting text. Tap the alert banner to open its bulletin directly. Other active alerts appear below it. Back returns to the dashboard. Official alerts refresh every 5 minutes. A successful response replaces the active set after ID/update/expiry processing. A failed fetch does not mean "no alerts": still-valid cached alerts remain visible and the feed-error state is exposed. ECCC official alerts and AQHI are Canada-only. Outside Canada the dashboard instead requests **US AQI**, a regional model estimate from the Copernicus Atmosphere Monitoring Service (CAMS) via the [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api). It uses the US scale, not each country’s official index or a local station observation. Data & about shows the model time and fetch time. A failed refresh marks the previous value stale, or unavailable if there is no reading.
+An active official alert takes precedence over routine dry-day clothing advice. The badge counts only other active alerts. The bottom banner uses one line of supporting text. Tap the alert banner to open its bulletin directly. Other active alerts appear below it. Back returns to the dashboard. Official alerts refresh every 5 minutes. A successful response replaces the active set after ID/update/expiry processing. A failed fetch does not mean "no alerts": still-valid cached alerts remain visible and the feed-error state is exposed. ECCC official alerts and AQHI are Canada-only. Outside Canada the dashboard instead requests **US AQI**, a regional model estimate from the Copernicus Atmosphere Monitoring Service (CAMS) via the [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api). It uses the US scale, not each country’s official index or a local station observation. Data & about shows the model time and fetch time. A failed refresh marks the previous value stale, or unavailable if there is no reading.
 
 Alert freshness is based on the last successful fetch, not an individual
 alert's publication date; at the defaults the feed is marked stale after two
@@ -262,6 +262,8 @@ negative AQHI observations are rejected transactionally so an earlier valid
 value can remain visible as stale.
 
 Default refresh and staleness values can be changed with `menuconfig` without altering parser semantics.
+
+The wind strip follows the same local-hour boundaries as the precipitation bars. “Breezy” starts at 20 km/h sustained or 30 km/h gusts; “Strong” at 30 or 40 km/h respectively. These descriptive bands are separate from the 60 km/h gust threshold for wind advice. A missing wind interval leaves a gap. Gold on the rail means daylight, even on a cloudy day. Unknown sunrise/sunset times are omitted; a confirmed polar day or night uses a single rail color.
 
 ## Advice rules
 
@@ -277,11 +279,11 @@ Convenience thresholds are application defaults, not official warning criteria:
 | Cold apparent temperature | -15 C |
 | High UV | 6 |
 
-Priority is deterministic: applicable official warnings/watches can override forecast-derived advice; then thunderstorm risk, ice, heat/cold, very high AQHI, strong wind, heavy rain, snow, routine rain, optional UV, and dry. Strong wind with rain recommends a rain jacket instead of an umbrella. Open-Meteo thunderstorm codes are phrased as forecast risk, not nearby detected lightning.
+Priority is deterministic: applicable official warnings/watches can override forecast-derived advice; then thunderstorm risk, ice, heat/cold, poor air quality (high/very high AQHI or US AQI of 151+), strong gusts, heavy rain, snow, routine rain, optional UV, and ordinary clothing advice. Strong wind with rain recommends a rain jacket instead of an umbrella. Open-Meteo thunderstorm codes are phrased as forecast risk, not nearby detected lightning.
 
 Remaining-day rain prorates a currently active provider hour by its elapsed fraction and marks the result approximate. This is an estimate from an hourly model interval, not exact minute-by-minute onset. A current dry interval does not make a later exact total approximate.
 
-`Dry` / `No umbrella needed` requires complete liquid-rain fields across all
+Routine dry-day clothing advice requires known liquid-rain fields across all
 remaining forecast intervals. Mixed known-zero and missing intervals produce
 an unavailable umbrella state; a known positive amount can still justify
 taking an umbrella even if a later interval is incomplete.
@@ -381,7 +383,7 @@ cmake -S host -B build-sim \
 cmake --build build-sim --target patio_weather_simulator --parallel
 
 ./build-sim/patio_weather_simulator \
-  --fixture baseline --screen home --output baseline.png
+  --fixture minimal-rain --screen home --output rainy-dashboard.png
 ./build-sim/patio_weather_simulator \
   --fixture labour-day --screen home --output labour-day.png
 ./build-sim/patio_weather_simulator \
@@ -393,7 +395,7 @@ Valid screens are `home`, `settings`, `holidays`, `air`, `display`, `location`,
 Output is the same 1024 x 600 LVGL object tree used by
 the firmware, rendered headlessly to PNG.
 
-The final verified set is under `screenshots/fixtures/` (27 home
+The updated dashboard renders are in [screenshots/dashboard](screenshots/dashboard). The earlier release set is under `screenshots/fixtures/` (27 home
 fixtures) and `screenshots/screens/` (11 screen modes); all 38 images are
 1024 x 600.
 
@@ -443,7 +445,7 @@ After flashing, run this concrete device checklist:
 7. Confirm stale weather, stale AQHI, alert-feed failure with an active cached alert, AQHI 10+, and missing/null fields.
 8. Compare provider timestamps and chart intervals against the Data & about screen and the raw API response.
 
-The smallest remaining deployment action is to connect the actual 7B's **USB TO UART** port and run `idf.py -p <CH343-port> flash monitor`, then perform the checklist above.
+Version 1.0.28 completed a physical boot and Wi-Fi reconnect check on the 7B. Version 1.0.29 adds touch-wake and brightness fixes. See the [build report](BUILD_REPORT.md) for the tests and hardware coverage, and the [wake troubleshooting guide](docs/proximity-setup.md#distinguishing-a-timeout-from-a-restart) for an intermittent black screen.
 
 ## Attribution and licenses
 

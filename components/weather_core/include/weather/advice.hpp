@@ -13,6 +13,7 @@ struct AdviceInput {
     AdviceThresholds thresholds{};
     bool uv_enabled{true};
     bool convenience_enabled{true};
+    bool clock_24_hour{false};
 };
 
 Advice choose_advice(const AdviceInput& input);

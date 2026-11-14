@@ -73,14 +73,13 @@ void tap_key(lv_obj_t* keyboard, const char* key) {
     assert(false && "key missing");
 }
 void collect_rain_labels(lv_obj_t* root, std::vector<lv_area_t>& areas) {
-    if(lv_obj_check_type(root, &lv_label_class) && std::strcmp(lv_label_get_text(root), "mm") == 0) {
-        lv_area_t area{};
-        lv_obj_get_coords(lv_obj_get_parent(root), &area);
-        areas.push_back(area);
-        // The unit must fit in its parent; the original baseline clipped it.
-        lv_area_t unit{};
-        lv_obj_get_coords(root, &unit);
-        assert(unit.x2 <= area.x2 && unit.y2 <= area.y2);
+    if(lv_obj_check_type(root, &lv_label_class)) {
+        const auto* text=lv_label_get_text(root);
+        const auto n=std::strlen(text);
+        if(n>2 && (std::strcmp(text+n-2,"mm")==0 || std::strcmp(text+n-2,"cm")==0)) {
+            lv_area_t area{}; lv_obj_get_coords(root,&area);
+            areas.push_back(area);
+        }
     }
     for(std::uint32_t i = 0; i < lv_obj_get_child_cnt(root); ++i)
         collect_rain_labels(lv_obj_get_child(root, i), areas);
@@ -91,7 +90,7 @@ void check_rain_labels(std::size_t expected) {
     collect_rain_labels(lv_scr_act(), areas);
     assert(areas.size() == expected);
     for(std::size_t i = 0; i < areas.size(); ++i) {
-        assert(areas[i].x1 >= 24 && areas[i].x2 < 1000 && areas[i].y1 >= 278 && areas[i].y2 < 401);
+        assert(areas[i].x1 >= 20 && areas[i].x2 < 1004 && areas[i].y1 >= 170 && areas[i].y2 < 287);
         for(std::size_t j = 0; j < i; ++j) {
             assert(areas[i].x2 < areas[j].x1 || areas[j].x2 < areas[i].x1 ||
                    areas[i].y2 < areas[j].y1 || areas[j].y2 < areas[i].y1);
@@ -227,7 +226,9 @@ int main() {
     assert(patio::ui::is_debug_open(ui));
     patio::ui::DebugReadings dbg{};
     dbg.rssi_dbm = patio::Optional<int>::some(-65);
+    dbg.reset_reason = "Brownout";
     patio::ui::update_debug(ui, dbg);
+    assert(label(lv_scr_act(), "Last restart: Brownout\nFree RAM: 0 KiB / PSRAM: 0 KiB"));
     assert(label(lv_scr_act(), "-65 dBm") && label(lv_scr_act(), "Not detected"));
     patio::ui::set_range_status(ui, true, 512);
     assert(label(lv_scr_act(), "512 mm"));
@@ -250,7 +251,7 @@ int main() {
     assert(label(lv_scr_act(), "US AQI 146"));
     korean.air_quality.status.state = patio::SourceState::Stale;
     patio::ui::update_dashboard(ui, korean);
-    assert(label(lv_scr_act(), "Air quality / Stale"));
+    assert(label(lv_scr_act(), "US AQI 146 • Stale"));
     model.weather.current_temperature_c = patio::Optional<float>::some(-0.4F);
     model.weather.current_apparent_c = patio::Optional<float>::some(-0.4F);
     patio::ui::update_dashboard(ui, model);
@@ -268,28 +269,60 @@ int main() {
         patio::ui::update_dashboard(ui, model);
         check_rain_labels(visible);
     }
-    // When the minute badge crosses a named tick, keep the caption visible
-    // below it; restore the usual row when the badge moves away.
+    // Rain millimetres and snow centimetres remain independently readable in every hour.
+    for(auto& h:model.weather.hours) h.snowfall_cm=patio::Optional<float>::some(2.3f);
+    patio::ui::update_dashboard(ui,model);
+    check_rain_labels(36);
+    for(auto& h:model.weather.hours) h.snowfall_cm={};
+    // A moving marker sits on the rail without ever moving or obscuring its captions.
     auto noon = model.local_now;
     noon.hour = 12; noon.minute = 0;
     patio::ui::minute_tick(ui, model.now_utc, noon);
     lv_obj_update_layout(lv_scr_act());
     auto* noon_tick = label(lv_scr_act(), "Noon");
-    assert(noon_tick && noon_tick->coords.y1 >= 444 && noon_tick->coords.y2 < 466);
+    assert(noon_tick && noon_tick->coords.y1 == 299);
+    auto marker_at=[](int x,int y) {
+        lv_refr_now(nullptr);
+        const auto c=lv_color_to32(frame[y*1024+x]);
+        lv_color32_t out{}; out.full=c;
+        return out.ch.green>180 && out.ch.blue>180 && out.ch.red<60;
+    };
+    assert(marker_at(369,272));
     noon.minute = 59;
     patio::ui::minute_tick(ui, model.now_utc + 59*60, noon);
     lv_obj_update_layout(lv_scr_act());
     noon.hour = 15; noon.minute = 0;
     patio::ui::minute_tick(ui, model.now_utc + 3*3600, noon);
     lv_obj_update_layout(lv_scr_act());
-    assert(label(lv_scr_act(), "Noon")->coords.y1 == 420);
-    assert(label(lv_scr_act(), "3 PM")->coords.y1 >= 444);
+    assert(label(lv_scr_act(), "Noon")==noon_tick && noon_tick->coords.y1 == 299);
+    assert(label(lv_scr_act(), "3 PM")->coords.y1 == 299 && marker_at(517,272) && !marker_at(369,272));
     assert(!label(lv_scr_act(), "NOW") && !label(lv_scr_act(), "DEVELOPMENT FIXTURE"));
     auto tomorrow = model.local_now;
     ++tomorrow.day; tomorrow.hour = 0; tomorrow.minute = 0;
     patio::ui::minute_tick(ui, model.now_utc + 86400, tomorrow);
     assert(label(lv_scr_act(), "Updating today's forecast"));
     assert(label(lv_scr_act(), "Updating today's weather"));
+    assert(!label(lv_scr_act(),"Sunrise 7:11 AM") && !label(lv_scr_act(),"High 14°"));
+    auto design=patio::make_fixture(patio::FixtureId::MinimalRain);
+    patio::ui::update_dashboard(ui,design);
+    check_rain_labels(7);
+    assert(label(lv_scr_act(),"High 9°") && label(lv_scr_act(),"Low 4°") &&
+           label(lv_scr_act(),"AQHI 3 • Low") && label(lv_scr_act(),"Sunrise 7:11 AM") &&
+           label(lv_scr_act(),"Sunset 5:23 PM") && label(lv_scr_act(),"STRONG"));
+    assert(!label(lv_scr_act(),"Morning") && !label(lv_scr_act(),"Forecast at a glance"));
+    auto time=design.local_now; time.hour=11; time.minute=30;
+    auto* drizzle=label(lv_scr_act(),"0.2mm"); const int normal_y=drizzle->coords.y1;
+    patio::ui::minute_tick(ui,design.now_utc+48*60,time); lv_obj_update_layout(lv_scr_act());
+    assert(drizzle->coords.y1<normal_y && drizzle->coords.y2<287-24);
+    time.hour=12; time.minute=45;
+    patio::ui::minute_tick(ui,design.now_utc+123*60,time); lv_obj_update_layout(lv_scr_act());
+    assert(drizzle->coords.y1==normal_y);
+    for(auto fixture : {patio::FixtureId::Snow,patio::FixtureId::Thunderstorm,patio::FixtureId::HighUv}) {
+        auto d=patio::make_fixture(fixture);
+        patio::ui::update_dashboard(ui,d);
+        assert(label(lv_scr_act(),fixture==patio::FixtureId::Snow ? "4.0cm" :
+                                  fixture==patio::FixtureId::Thunderstorm ? "Storm" : "UV"));
+    }
 
     std::array<patio::ui::WifiNetwork, patio::ui::kMaxWifiNetworks> networks;
     for(std::size_t i = 0; i < networks.size(); ++i) {
@@ -427,14 +460,18 @@ int main() {
     patio::ui::destroy(ui);
     ui = patio::ui::create(lv_scr_act(), &settings, command, nullptr);
     patio::ui::show_display_settings(ui);
+    assert(lv_slider_get_min_value(widget(lv_scr_act(), &lv_slider_class)) == 1);
     patio::ui::set_range_status(ui, true, 998);
     assert(label(lv_scr_act(), "Sensor distance: 998 mm"));
     auto* distances = widget(lv_scr_act(), &lv_dropdown_class);
     assert(distances && lv_dropdown_get_selected(distances) == 7 && lv_dropdown_get_option_cnt(distances) == 18);
     lv_dropdown_set_selected(distances, 17);
     lv_event_send(distances, LV_EVENT_VALUE_CHANGED, nullptr);
-    click("30 sec"); click("Confirm");
-    assert(last_command.kind == patio::ui::UiCommandKind::SaveSettings && last_command.settings.auto_off_seconds == 30 && last_command.settings.wake_distance_cm == 200);
+    click("180 degrees"); click("30 sec"); click("Confirm");
+    assert(last_command.kind == patio::ui::UiCommandKind::SaveSettings &&
+           last_command.settings.auto_off_seconds == 30 &&
+           last_command.settings.wake_distance_cm == 200 &&
+           last_command.settings.display_rotation == 180);
     patio::ui::destroy(ui);
     ui = patio::ui::create(lv_scr_act(), &settings, command, nullptr);
     patio::ui::show_holiday_settings(ui);

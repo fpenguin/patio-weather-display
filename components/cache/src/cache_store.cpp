@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <new>
 #include <unistd.h>
@@ -25,7 +26,10 @@ constexpr const char* kPaths[] = {
     PATIO_CACHE_DIRECTORY "/sources-a.bin", PATIO_CACHE_DIRECTORY "/sources-b.bin",
     PATIO_CACHE_DIRECTORY "/sources.bin", PATIO_CACHE_DIRECTORY "/sources.tmp"};
 constexpr std::uint32_t kMagic = 0x50415443U;
-constexpr std::uint16_t kVersion = 2;
+constexpr std::uint16_t kVersion = 3;
+constexpr std::size_t kDailyOffset = offsetof(CachedSources, weather) + offsetof(WeatherSnapshot, days);
+constexpr std::size_t kDailyBytes = sizeof(WeatherSnapshot::days);
+static_assert(kDailyOffset + kDailyBytes == offsetof(CachedSources, air_quality));
 
 struct Header {
     std::uint32_t magic;
@@ -74,16 +78,24 @@ bool read_candidate(std::size_t index, Header& header, CachedSources& scratch) {
     if (!file) return false;
     header = {};
     bool valid = std::fread(&header, kLegacyHeaderBytes, 1, file) == 1 &&
-                 header.magic == kMagic && header.payload_size == sizeof(CachedSources);
-    if (valid && header.version == kVersion) {
+                 header.magic == kMagic;
+    const bool legacy = header.version == 1 || header.version == 2;
+    valid = valid && (legacy || header.version == kVersion) &&
+            header.payload_size == sizeof(CachedSources) - (legacy ? kDailyBytes : 0);
+    if (valid && header.version >= 2) {
         valid = std::fread(&header.generation, sizeof(Header) - kLegacyHeaderBytes, 1, file) == 1 &&
                 header.generation != 0 &&
                 header.header_crc32 == crc32(&header, offsetof(Header, header_crc32));
     } else if (header.version != 1 || index < 2) {
         valid = false;
     }
-    valid = valid && std::fread(&scratch, sizeof(scratch), 1, file) == 1 &&
-             header.crc32 == crc32(&scratch, sizeof(scratch)) && std::fgetc(file) == EOF;
+    valid = valid && std::fread(&scratch, header.payload_size, 1, file) == 1 &&
+             header.crc32 == crc32(&scratch, header.payload_size) && std::fgetc(file) == EOF;
+    if (valid && legacy) {
+        auto* bytes = reinterpret_cast<unsigned char*>(&scratch);
+        std::memmove(bytes + kDailyOffset + kDailyBytes, bytes + kDailyOffset, header.payload_size - kDailyOffset);
+        scratch.weather.days = {};
+    }
     if (std::fclose(file) != 0) valid = false;
     return valid;
 }

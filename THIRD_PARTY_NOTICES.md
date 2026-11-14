@@ -18,7 +18,7 @@ ESP-IDF 5.5.2, `esp_lvgl_adapter` 0.5.2, and `esp_lcd_touch_gt911` 1.2.1 are res
 
 ## Montserrat
 
-The two compiled display-font subsets are derived from Montserrat Black. Montserrat is licensed under the SIL Open Font License 1.1. A copy is in `third_party/licenses/Montserrat-OFL.txt`.
+The compiled dashboard fonts are subsets of Montserrat Black, Bold and SemiBold v9.000. Montserrat is licensed under the SIL Open Font License 1.1. A copy is in `third_party/licenses/Montserrat-OFL.txt`.
 
 ## IANA time-zone database
 

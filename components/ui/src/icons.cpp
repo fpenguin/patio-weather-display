@@ -1,5 +1,6 @@
 #include "weather/icons.hpp"
 
+#include <algorithm>
 #include <cstdint>
 
 namespace patio {
@@ -231,13 +232,21 @@ void draw_moon(IconPainter & p)
 
 void draw_umbrella(IconPainter & p)
 {
-    p.arc(500, 505, 350, 180, 360);
-    p.line(150, 505, 850, 505);
-    p.line(500, 155, 500, 800);
-    p.arc(590, 800, 90, 90, 180);
-    p.line(150, 505, 267, 505);
-    p.line(383, 505, 617, 505);
-    p.line(733, 505, 850, 505);
+    auto stroke = std::max(2,int(p.stroke())*2/3);
+    p.arc(500,610,356,180,360,stroke);
+    p.line(144,610,237,570,stroke); p.line(237,570,369,610,stroke);
+    p.line(369,610,494,571,stroke); p.line(494,571,631,610,stroke);
+    p.line(631,610,751,568,stroke); p.line(751,568,856,610,stroke);
+    p.line(369,610,389,437,stroke); p.line(389,437,431,329,stroke); p.line(431,329,500,254,stroke);
+    p.line(631,610,611,437,stroke); p.line(611,437,569,329,stroke); p.line(569,329,500,254,stroke);
+    p.line(500,243,500,847,stroke); p.arc(445,847,55,0,180,stroke);
+    for(auto drop : {p.point(272,163),p.point(554,80),p.point(754,181)}) {
+        const auto r=p.scale(44);
+        const lv_point_t points[]={{lv_coord_t(drop.x+r),lv_coord_t(drop.y-r*2)},
+            {lv_coord_t(drop.x+r),lv_coord_t(drop.y+r/2)}, {drop.x,lv_coord_t(drop.y+r)},
+            {lv_coord_t(drop.x-r),drop.y}};
+        p.polygon(points,4);
+    }
 }
 
 void draw_rain(IconPainter & p)
@@ -343,6 +352,12 @@ void draw_icon(lv_event_t * event)
     switch(kind) {
         case IconKind::settings_sliders:
             draw_settings_sliders(painter);
+            break;
+        case IconKind::horizon:
+            painter.arc(500,676,230,180,360);
+            painter.line(30,680,970,680);
+            painter.line(500,260,500,120);
+            painter.line(261,344,170,230); painter.line(739,344,830,230);
             break;
         case IconKind::sun:
             draw_sun(painter);

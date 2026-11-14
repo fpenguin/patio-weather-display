@@ -4,6 +4,9 @@ idf_component_register(
         "src/weather_ui.cpp"
         "fonts/patio_font_display_112.c"
         "fonts/patio_font_display_96.c"
+        "fonts/patio_bold_14.c" "fonts/patio_bold_20.c"
+        "fonts/patio_bold_24.c" "fonts/patio_bold_40.c"
+        "fonts/patio_semibold_26.c"
     INCLUDE_DIRS "include"
     REQUIRES weather_core lvgl
 )

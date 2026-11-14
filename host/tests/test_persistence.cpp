@@ -125,16 +125,22 @@ int main() {
     assert(!prepare_confirmed_location(current, preview, loaded).valid && loaded.location.time_zone == "Asia/Seoul");
     loaded.auto_off_seconds = 300;
     loaded.wake_distance_cm = 200;
+    loaded.display_rotation = 180;
     assert(persistence_save(loaded) == ESP_OK);
     reboot(); Settings resumed{};
-    assert(persistence_load(resumed).state == PersistenceLoadState::Loaded && resumed.auto_off_seconds == 300 && resumed.wake_distance_cm == 200);
+    assert(persistence_load(resumed).state == PersistenceLoadState::Loaded &&
+           resumed.auto_off_seconds == 300 && resumed.wake_distance_cm == 200 &&
+           resumed.display_rotation == 180);
     // Reconstruct the previous schema with arbitrary padding and its original valid CRC.
     struct Slot { uint32_t magic; uint16_t version, size; uint32_t gen; Settings settings; uint32_t crc; };
     auto& bytes = durable[durable["active"][0] ? "slot_b" : "slot_a"];
     assert(bytes.size() == sizeof(Slot));
-    for (int version : {3, 2}) {
+    for (int version : {5, 4, 3, 2}) {
         bytes[offsetof(Slot,version)] = version;
-        bytes[offsetof(Slot,settings)+offsetof(Settings,wake_distance_cm)] = 0xab;
+        bytes[offsetof(Slot,settings)+offsetof(Settings,brightness_percent)] = 0;
+        if (version < 4)
+            bytes[offsetof(Slot,settings)+offsetof(Settings,wake_distance_cm)] = 0xab;
+        if (version < 5) bytes[offsetof(Slot,settings)+offsetof(Settings,display_rotation)] = 0xab;
         if (version == 2) bytes[offsetof(Slot,settings)+6] = 0xab;
         uint32_t crc = ~0U;
         for (size_t i=0; i<offsetof(Slot,crc); ++i) {
@@ -142,7 +148,10 @@ int main() {
         }
         crc = ~crc; std::memcpy(bytes.data()+offsetof(Slot,crc), &crc, sizeof(crc));
         assert(persistence_load(resumed).state == PersistenceLoadState::Loaded &&
-               resumed.auto_off_seconds == (version == 2 ? 60 : 300) && resumed.wake_distance_cm == 100 &&
+               resumed.auto_off_seconds == (version == 2 ? 60 : 300) &&
+               resumed.wake_distance_cm == (version < 4 ? 100 : 200) &&
+               resumed.display_rotation == (version < 5 ? 0 : 180) &&
+               resumed.brightness_percent == kDefaultReadingBrightness &&
                resumed.location.display_name == "Seoul, South Korea");
     }
     std::puts("persistence: restart, commit failures, CRC, pointer repair, invalid input and erase passed");

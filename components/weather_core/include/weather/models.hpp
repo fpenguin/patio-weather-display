@@ -1,4 +1,5 @@
 #pragma once
+#include "weather/proximity.hpp"
 
 #include <array>
 #include <cstddef>
@@ -116,6 +117,13 @@ struct HourlyWeather {
 
 constexpr std::size_t kMaxWeatherHours = 72;
 
+struct DailyWeather {
+    // Noon inside the provider's local daily bucket (safe across DST changes).
+    std::int64_t anchor_utc{};
+    std::int64_t sunrise_utc{}, sunset_utc{};  // Zero means no supplied event.
+    Optional<float> high_c{}, low_c{}, daylight_seconds{};
+};
+
 struct WeatherSnapshot {
     SourceStatus status{};
     Optional<float> current_temperature_c{};
@@ -126,6 +134,7 @@ struct WeatherSnapshot {
     std::array<HourlyWeather, kMaxWeatherHours> hours{};
     std::size_t hour_count{0};
     Text<48> provider{"Open-Meteo"};
+    alignas(8) std::array<DailyWeather, 3> days{}; // Yesterday, today, tomorrow.
 };
 
 enum class AqhiCategory : std::uint8_t { Unknown, Low, Moderate, High, VeryHigh };
@@ -200,7 +209,7 @@ struct Settings {
     bool clock_24_hour{false};
     bool uv_advice_enabled{true};
     bool convenience_advice_enabled{true};
-    std::uint8_t brightness_percent{80};
+    std::uint8_t brightness_percent{kDefaultReadingBrightness};
     std::uint8_t dim_brightness_percent{25};
     // Occupies the two previously unused schema-2 alignment bytes.
     std::uint16_t auto_off_seconds{60};
@@ -219,6 +228,10 @@ struct Settings {
     AdviceThresholds thresholds{};
     // Uses former trailing padding in the schema-2/3 NVS blob.
     std::uint16_t wake_distance_cm{100};
+    // Stored as degrees so persisted data is self-describing. The display
+    // currently supports the two landscape orientations: 0 and 180.
+    std::uint8_t display_rotation{0};
+    std::uint8_t settings_reserved{0};
 };
 
 enum class AdviceKind : std::uint8_t {

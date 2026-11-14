@@ -1,6 +1,7 @@
 #include "weather/advice.hpp"
 
 #include "weather/rainfall.hpp"
+#include "weather/timeline.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -62,68 +63,51 @@ Advice official_banner(const WeatherAlert& alert, std::size_t index, int score, 
     return banner;
 }
 
-// Preserve each endpoint's meridiem. A local interval can end at 1440,
-// meaning midnight at the end of this day, rather than noon.
-void format_rain_time(int minute, char* text, std::size_t capacity) {
-    minute %= 24 * 60;
-    if (minute == 0) {
-        std::snprintf(text, capacity, "midnight");
-    } else if (minute == 12 * 60) {
-        std::snprintf(text, capacity, "noon");
-    } else {
-        const int hour = minute / 60;
-        const int display_hour = hour % 12 == 0 ? 12 : hour % 12;
-        if (minute % 60 == 0) {
-            std::snprintf(text, capacity, "%d %s", display_hour, hour >= 12 ? "PM" : "AM");
-        } else {
-            std::snprintf(text, capacity, "%d:%02d %s", display_hour, minute % 60,
-                          hour >= 12 ? "PM" : "AM");
-        }
+enum class Window { Rain, Snow, StrongWind };
+
+bool matches(const HourlyWeather& h, Window kind, const AdviceThresholds& t) {
+    const auto rain = liquid_rain_for_hour(h);
+    switch (kind) {
+        case Window::Rain: return rain.valid && rain.millimetres >= t.minimum_umbrella_rain_mm;
+        case Window::StrongWind: return wind_exposure(h) == Exposure::Strong;
+        case Window::Snow: return (h.snowfall_cm.valid && h.snowfall_cm.value > 0) ||
+            (h.weather_code.valid && code_in(h.weather_code.value, {71,73,75,77,85,86}));
     }
+    return false;
 }
 
-const HourlyWeather* next_rain_hour(const WeatherSnapshot& weather,
-                                  const AdviceInput& input) {
-    const HourlyWeather* next = nullptr;
-    for (std::size_t i = 0; i < weather.hour_count && i < weather.hours.size(); ++i) {
-        const auto& hour = weather.hours[i];
-        if (hour.interval_end_utc <= input.now_utc ||
-            hour.interval_start_utc >= input.local_day_end_utc) continue;
-        const RainAmount rain = liquid_rain_for_hour(hour);
-        if (rain.valid && rain.millimetres >= input.thresholds.minimum_umbrella_rain_mm &&
-            (!next || hour.interval_start_utc < next->interval_start_utc)) next = &hour;
+struct WindowSpan { const HourlyWeather* first{}; const HourlyWeather* last{}; };
+
+WindowSpan next_window(const WeatherSnapshot& w, const AdviceInput& in, Window kind) {
+    WindowSpan span;
+    // The time series need not be sorted. Do not bridge dry or missing hours.
+    for (std::size_t i = 0; i < w.hour_count && i < w.hours.size(); ++i) {
+        const auto& h = w.hours[i];
+        if (h.interval_end_utc <= in.now_utc || h.interval_start_utc >= in.local_day_end_utc ||
+            h.interval_start_utc >= h.interval_end_utc || !matches(h, kind, in.thresholds)) continue;
+        if (!span.first || h.interval_start_utc < span.first->interval_start_utc) span.first = &h;
     }
-    return next;
+    span.last = span.first;
+    if (!span.first) return span;
+    for (;;) {
+        const HourlyWeather* next = nullptr;
+        for (std::size_t i = 0; i < w.hour_count && i < w.hours.size(); ++i) {
+            const auto& h = w.hours[i];
+            if (h.interval_start_utc == span.last->interval_end_utc && h.interval_end_utc > h.interval_start_utc &&
+                h.interval_start_utc < in.local_day_end_utc && matches(h, kind, in.thresholds)) { next = &h; break; }
+        }
+        if (!next) break;
+        span.last = next;
+    }
+    return span;
 }
 
-void rain_window_copy(const WeatherSnapshot& weather, const AdviceInput& input,
-                      const HourlyWeather* first, char* text, std::size_t capacity) {
-    if (!first || first->local_start_minute < 0 || first->local_end_minute < 0) {
-        std::snprintf(text, capacity, "Rain remains possible today");
-        return;
-    }
-    const HourlyWeather* last = first;
-    // Extend only across adjacent rainy intervals. A dry, missing or absent
-    // interval ends this window; later showers are not merged into it.
-    for (std::size_t step = 0; step < weather.hour_count && step < weather.hours.size(); ++step) {
-        const HourlyWeather* following = nullptr;
-        for (std::size_t i = 0; i < weather.hour_count && i < weather.hours.size(); ++i) {
-            const auto& hour = weather.hours[i];
-            if (hour.interval_start_utc != last->interval_end_utc ||
-                hour.interval_start_utc >= input.local_day_end_utc ||
-                hour.interval_end_utc <= hour.interval_start_utc) continue;
-            const RainAmount rain = liquid_rain_for_hour(hour);
-            if (rain.valid && rain.millimetres >= input.thresholds.minimum_umbrella_rain_mm)
-                following = &hour;
-            break;
-        }
-        if (!following || following->local_end_minute < 0) break;
-        last = following;
-    }
-    char start[16]{}, end[16]{};
-    format_rain_time(first->local_start_minute, start, sizeof(start));
-    format_rain_time(last->local_end_minute, end, sizeof(end));
-    std::snprintf(text, capacity, "Rain expected around %s to %s", start, end);
+void append_window(char* text, std::size_t n, const char* label, WindowSpan span, bool clock24) {
+    if (!span.first || span.first->local_start_minute < 0 || span.last->local_end_minute < 0) return;
+    char times[40];
+    format_time_window(span.first->local_start_minute, span.last->local_end_minute, clock24, times, sizeof(times));
+    const auto used = std::strlen(text);
+    std::snprintf(text+used, n-used, " • %s %s", label, times);
 }
 
 }  // namespace
@@ -195,7 +179,7 @@ Advice choose_advice(const AdviceInput& input) {
         const int code = hour.weather_code.valid ? hour.weather_code.value : -1;
         thunder |= code_in(code, {95, 96, 97, 99});
         ice |= code_in(code, {56, 57, 66, 67});
-        snow |= code_in(code, {71, 73, 75, 77, 85, 86});
+        snow |= matches(hour, Window::Snow, input.thresholds);
         if (hour.gust_kmh.valid) peak_gust = std::max(peak_gust, hour.gust_kmh.value);
         if (hour.uv_index.valid) peak_uv = std::max(peak_uv, hour.uv_index.value);
         if (hour.apparent_temperature_c.valid) {
@@ -211,10 +195,10 @@ Advice choose_advice(const AdviceInput& input) {
         }
     }
     const RainAmount remaining = remaining_liquid_rain(weather, input.now_utc, input.local_day_end_utc);
-    const HourlyWeather* next_rain = next_rain_hour(weather, input);
+    const WindowSpan wet = next_window(weather, input, Window::Rain);
     // Proration is appropriate for the remaining total, but must not turn an
     // in-progress rainy forecast hour into a dry recommendation near its end.
-    const bool rain_expected = next_rain ||
+    const bool rain_expected = wet.first ||
         (remaining.valid && remaining.millimetres >= input.thresholds.minimum_umbrella_rain_mm);
 
     if (thunder) {
@@ -231,10 +215,14 @@ Advice choose_advice(const AdviceInput& input) {
                low_apparent <= input.thresholds.cold_apparent_c) {
         set_copy(result, AdviceKind::Cold, 85,
                  "Very cold outside", "Add warm layers before heading out");
-    } else if (input.air_quality && input.air_quality->status.state != SourceState::Unavailable &&
-               input.air_quality->category == AqhiCategory::VeryHigh) {
+    } else if (input.air_quality && (input.air_quality->status.state == SourceState::Fresh ||
+               input.air_quality->status.state == SourceState::Stale) &&
+               (input.air_quality->category >= AqhiCategory::High ||
+                (input.air_quality->scale == "US AQI" && input.air_quality->display_index.valid &&
+                 input.air_quality->display_index.value >= 151))) {
         set_copy(result, AdviceKind::PoorAirQuality, 84,
-                 input.air_quality->official_smoke_supported ? "Wildfire smoke outside" : "Very poor air quality",
+                 input.air_quality->official_smoke_supported ? "Wildfire smoke outside" :
+                 input.air_quality->category == AqhiCategory::VeryHigh ? "Very poor air quality" : "Poor air quality",
                  "Reduce strenuous outdoor activity");
     } else if (input.convenience_enabled &&
                peak_gust >= input.thresholds.strong_wind_gust_kmh) {
@@ -242,18 +230,21 @@ Advice choose_advice(const AdviceInput& input) {
                  "Strong winds expected",
                  rain_expected
                      ? "Choose a rain jacket instead of an umbrella"
-                     : "Secure loose patio items before heading out");
+                     : "Wear a windproof layer");
     } else if (input.convenience_enabled &&
                ((remaining.valid && remaining.millimetres >= input.thresholds.heavy_rain_remaining_mm) ||
                 peak_hourly_rain >= input.thresholds.heavy_rain_hourly_mm)) {
-        set_copy(result, AdviceKind::HeavyRain, 80,
-                 "Heavy rain today", "Waterproof layers recommended");
+        char line[112] = "Wear waterproof layers";
+        append_window(line, sizeof(line), "Rain", wet, input.clock_24_hour);
+        set_copy(result, AdviceKind::HeavyRain, 80, "Heavy rain today", line);
     } else if (input.convenience_enabled && snow) {
-        set_copy(result, AdviceKind::Snow, 78,
-                 "Snow expected today", "Allow extra travel time");
+        char line[112] = "Wear grippy boots";
+        append_window(line, sizeof(line), "Snow", next_window(weather, input, Window::Snow), input.clock_24_hour);
+        set_copy(result, AdviceKind::Snow, 78, "Snow expected today", line);
     } else if (input.convenience_enabled && rain_expected) {
-        char support[112]{};
-        rain_window_copy(weather, input, next_rain, support, sizeof(support));
+        char support[112] = "Waterproof layer";
+        append_window(support, sizeof(support), "Rain", wet, input.clock_24_hour);
+        append_window(support, sizeof(support), "Strong wind", next_window(weather, input, Window::StrongWind), input.clock_24_hour);
         set_copy(result, AdviceKind::Rain, 60, "Take an umbrella", support);
     } else if (input.uv_enabled && peak_uv >= input.thresholds.high_uv_index) {
         set_copy(result, AdviceKind::HighUv, 50,
@@ -267,8 +258,15 @@ Advice choose_advice(const AdviceInput& input) {
         // Dry is a fallback. Even a statement has more to tell the reader.
         return official_banner(*best_alert, best_index, best_alert_score, active_alerts - 1);
     } else if (input.convenience_enabled) {
-        set_copy(result, AdviceKind::Dry, 10,
-                 "No umbrella needed", "Dry weather expected today");
+        if (low_apparent < 6)
+            set_copy(result, AdviceKind::Dry, 10, "Bring a warm layer", "Cool temperatures ahead");
+        else if (low_apparent < 16)
+            set_copy(result, AdviceKind::Dry, 10, "Pack a light layer", "Cool conditions ahead");
+        else if (peak_apparent >= 26)
+            set_copy(result, AdviceKind::Dry, 10, "Dress lightly", "Choose breathable clothing");
+        else
+            set_copy(result, AdviceKind::Dry, 10, "Dry weather ahead",
+                     low_apparent < 999 ? "Comfortable in light layers" : "No rain in the remaining forecast");
     } else {
         set_copy(result, AdviceKind::Dry, 5,
                  "Today's forecast", "Convenience weather advice is turned off");

@@ -1,5 +1,11 @@
 # Build and test report
 
+## 1.0.29 public release — November 15, 2026
+
+The dedicated release build passed all seven host suites (33 core cases), and the 1024 × 600 rainy-day render matched the dashboard preview byte for byte. ESP-IDF 5.5.2 produced a 2,080,112-byte live-provider application with 59% of the smallest OTA slot free. Compiler stack reports covered 302 project frames: maximum 2,672 bytes, zero violations of the 4,096-byte limit. See [release notes](RELEASE_NOTES.md) for the install files and [native dashboard QA](design-qa.md) for the display checks.
+
+The prior 1.0.28 image booted on the board, restored cached data and reconnected to Wi-Fi. The panel later came back on after an intermittent blackout; USB serial was unavailable for that event, so its cause is unknown. For 1.0.29, host tests injected GT911 input without an interrupt, bus and acknowledgement failures, a lost release interrupt, and old settings containing 0% reading brightness. The 1.0.29 image has not been flashed to that board.
+
 Release **1.0.26** adds all 10 Canadian provinces and all 3 territories to the offline holiday picker and automatic location mapping. All seven host suites passed, including 30 core cases. The ESP32-S3 target built with 59% of the OTA slot free; 286 project frames checked, maximum 2672 bytes, zero violations. The release package and merged image passed hash, offset, erased-gap, and OTA-fit verification. The board USB serial device was disconnected, so 1.0.26 was not physically flashed during release QA.
 
 Release **1.0.25** adds [offline holiday calendars](docs/holidays.md) for the US and South Korea. All seven host suites passed, including 29 core cases. The ESP32-S3 target built; 282 project frames checked, maximum 2672 bytes, zero violations. Three native LVGL screenshots were rendered. USB was unavailable before upload, so hardware validation below applies to previous versions.

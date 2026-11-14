@@ -3,6 +3,8 @@
 #include <cstdint>
 
 namespace patio {
+inline constexpr std::uint8_t kMinReadingBrightness = 1;
+inline constexpr std::uint8_t kDefaultReadingBrightness = 80;
 inline constexpr std::uint16_t screen_timeouts[]{30, 60, 120, 300, 0};
 inline bool valid_timeout(unsigned seconds) {
     for (auto t : screen_timeouts) if (seconds == t) return true;
@@ -19,15 +21,17 @@ constexpr RangeSample classify_distance(unsigned mm, unsigned wake_cm) {
     return mm <= threshold ? RangeSample::Near : mm >= threshold + 150 ? RangeSample::Clear : RangeSample::Band;
 }
 struct ProximityDisplay {
-    // Only the controller owns this state. Durations use monotonic milliseconds.
+    // Owned by the display power task. Durations use monotonic milliseconds.
     bool dark{false}, armed{true}, viewing_until_idle{false};
     unsigned hits{}, clear_count{};
     std::int64_t last_activity{};
     // A deliberate touch overrides scheduled dimming for one viewing interval.
     // "Never" disables shutoff, but returns to scheduled dimming after a minute.
     std::int64_t bright_until{};
-    std::uint8_t brightness(std::int64_t now, std::uint8_t normal, std::uint8_t scheduled) const {
+    std::uint8_t brightness(std::int64_t now, std::uint8_t normal, std::uint8_t scheduled,
+                            bool dashboard) const {
         if (dark) return 0;
+        if (!dashboard && !scheduled) return normal; // let the user finish setup after dark
         return (viewing_until_idle || now < bright_until) && normal > scheduled ? normal : scheduled;
     }
     bool update(std::int64_t now, unsigned seconds, bool dashboard, bool touched, RangeSample s) {

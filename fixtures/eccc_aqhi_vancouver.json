@@ -1,0 +1,67 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "AQ_OBS-JBRIK-20261112170000",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-123.113889, 49.261111]
+      },
+      "properties": {
+        "id": "AQ_OBS-JBRIK-20261112170000",
+        "aqhi_type": "AQHI-Observation",
+        "observation_type": "original",
+        "location_name_en": "Metro Vancouver - NW",
+        "location_name_fr": "Metro Vancouver - nord-ouest",
+        "location_id": "JBRIK",
+        "observation_datetime": "2026-11-12T17:00:00Z",
+        "observation_datetime_text_en": "10:00 AM PCT Thursday 12 November 2026",
+        "aqhi": 2.7,
+        "special_notes_en": "",
+        "latest": true
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AQ_OBS-JBRIK-20261112160000",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-123.113889, 49.261111]
+      },
+      "properties": {
+        "id": "AQ_OBS-JBRIK-20261112160000",
+        "aqhi_type": "AQHI-Observation",
+        "observation_type": "original",
+        "location_name_en": "Metro Vancouver - NW",
+        "location_id": "JBRIK",
+        "observation_datetime": "2026-11-12T16:00:00Z",
+        "aqhi": 2.4,
+        "special_notes_en": "",
+        "latest": false
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AQ_OBS-JBJFI-20261112170000",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-123.163333, 49.163333]
+      },
+      "properties": {
+        "id": "AQ_OBS-JBJFI-20261112170000",
+        "aqhi_type": "AQHI-Observation",
+        "observation_type": "original",
+        "location_name_en": "Metro Vancouver - SW",
+        "location_id": "JBJFI",
+        "observation_datetime": "2026-11-12T17:00:00Z",
+        "aqhi": 1.9,
+        "special_notes_en": "",
+        "latest": true
+      }
+    }
+  ],
+  "numberMatched": 3,
+  "numberReturned": 3,
+  "timeStamp": "2026-11-12T17:42:00Z"
+}

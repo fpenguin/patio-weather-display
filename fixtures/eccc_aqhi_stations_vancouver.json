@@ -1,0 +1,52 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-122.75, 49.1166666666667]},
+      "properties": {
+        "eccc_administrative-zone": "pyr",
+        "eccc_administrative-zone_name_en": "Pacific and Yukon",
+        "location_name_en": "Metro Vancouver - SE",
+        "location_id": "JAZBU"
+      },
+      "id": "JAZBU"
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-122.683333333333, 49.2333333333333]},
+      "properties": {
+        "eccc_administrative-zone": "pyr",
+        "eccc_administrative-zone_name_en": "Pacific and Yukon",
+        "location_name_en": "Metro Vancouver - NE",
+        "location_id": "JBXHZ"
+      },
+      "id": "JBXHZ"
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-123.163333, 49.163333]},
+      "properties": {
+        "eccc_administrative-zone": "pyr",
+        "eccc_administrative-zone_name_en": "Pacific and Yukon",
+        "location_name_en": "Metro Vancouver - SW",
+        "location_id": "JBJFI"
+      },
+      "id": "JBJFI"
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-123.113889, 49.261111]},
+      "properties": {
+        "eccc_administrative-zone": "pyr",
+        "eccc_administrative-zone_name_en": "Pacific and Yukon",
+        "location_name_en": "Metro Vancouver - NW",
+        "location_id": "JBRIK"
+      },
+      "id": "JBRIK"
+    }
+  ],
+  "numberMatched": 4,
+  "numberReturned": 4,
+  "timeStamp": "2026-11-12T15:08:21.605497Z"
+}

@@ -1,0 +1,54 @@
+{
+  "results": [
+    {
+      "id": 6173331,
+      "name": "Vancouver",
+      "latitude": 49.24966,
+      "longitude": -123.11934,
+      "elevation": 70.0,
+      "feature_code": "PPL",
+      "country_code": "CA",
+      "admin1_id": 5909050,
+      "admin2_id": 5965814,
+      "timezone": "America/Vancouver",
+      "population": 662248,
+      "country_id": 6251999,
+      "country": "Canada",
+      "admin1": "British Columbia",
+      "admin2": "Metro Vancouver Regional District"
+    },
+    {
+      "id": 6173336,
+      "name": "Vancouver Island",
+      "latitude": 49.65064,
+      "longitude": -125.44939,
+      "elevation": 1128.0,
+      "feature_code": "ISL",
+      "country_code": "CA",
+      "admin1_id": 5909050,
+      "timezone": "America/Vancouver",
+      "population": 748937,
+      "country_id": 6251999,
+      "country": "Canada",
+      "admin1": "British Columbia"
+    },
+    {
+      "id": 6301485,
+      "name": "Vancouver International Airport",
+      "latitude": 49.19489,
+      "longitude": -123.17923,
+      "elevation": 4.0,
+      "feature_code": "AIRP",
+      "country_code": "CA",
+      "admin1_id": 5909050,
+      "admin2_id": 5965814,
+      "timezone": "America/Vancouver",
+      "country_id": 6251999,
+      "country": "Canada",
+      "admin1": "British Columbia",
+      "admin2": "Metro Vancouver Regional District",
+      "admin3": "Richmond"
+    }
+  ],
+  "generationtime_ms": 0.24831295
+}

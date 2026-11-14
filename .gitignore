@@ -1,0 +1,12 @@
+.DS_Store
+/work/
+/dist/
+/build/
+/host/build/
+/managed_components/
+/sdkconfig.old
+/Mockups/
+__pycache__/
+*.pyc
+# Local debugging ELF contains absolute toolchain paths. Publish builds separately.
+/firmware/*.elf

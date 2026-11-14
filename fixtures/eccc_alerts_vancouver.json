@@ -1,0 +1,56 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "fixture-rainfall-warning_fea1-vancouver",
+      "geometry": null,
+      "properties": {
+        "alert_code": "RFW",
+        "alert_type": "warning",
+        "alert_name_en": "rainfall warning",
+        "alert_name_fr": "avertissement de pluie",
+        "alert_short_name_en": "Rainfall warning",
+        "publication_datetime": "2026-11-12T16:30:00.000Z",
+        "expiration_datetime": "2026-11-13T08:00:00.000Z",
+        "validity_datetime": "2026-11-12T16:30:00.000Z",
+        "event_end_datetime": "2026-11-13T06:00:00.000Z",
+        "alert_text_en": "Heavy rain is expected. Localized flooding in low-lying areas is possible. Monitor alerts and forecasts issued by Environment and Climate Change Canada.",
+        "risk_colour_en": "yellow",
+        "confidence_en": "High",
+        "impact_en": "Moderate",
+        "feature_name_en": "Metro Vancouver",
+        "province": "BC",
+        "status_en": "issued",
+        "feature_id": "fea1-vancouver"
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "fixture-special-air-quality-statement_fea1-vancouver",
+      "geometry": null,
+      "properties": {
+        "alert_code": "AQS",
+        "alert_type": "statement",
+        "alert_name_en": "special air quality statement",
+        "alert_name_fr": "bulletin spécial sur la qualité de l'air",
+        "alert_short_name_en": "Air quality statement",
+        "publication_datetime": "2026-11-12T15:15:00.000Z",
+        "expiration_datetime": "2026-11-13T02:00:00.000Z",
+        "validity_datetime": "2026-11-12T15:15:00.000Z",
+        "event_end_datetime": "2026-11-13T01:00:00.000Z",
+        "alert_text_en": "Wildfire smoke may reduce local air quality and visibility. Follow local health guidance and reduce strenuous outdoor activity if you experience symptoms.",
+        "risk_colour_en": "yellow",
+        "confidence_en": "High",
+        "impact_en": "Moderate",
+        "feature_name_en": "Metro Vancouver",
+        "province": "BC",
+        "status_en": "continued",
+        "feature_id": "fea1-vancouver"
+      }
+    }
+  ],
+  "numberMatched": 2,
+  "numberReturned": 2,
+  "timeStamp": "2026-11-12T17:42:00Z"
+}

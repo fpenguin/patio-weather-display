@@ -1,0 +1,10 @@
+IANA Time Zone Database (tzdata 2026f)
+https://www.iana.org/time-zones
+
+The Time Zone Database is in the public domain.  The generated transition
+table in this project was produced from tzdata2026f.tar.gz, SHA-256:
+01b4a91cec5167ed48c11e8ab78f2048cead78ce94b0cafcad0ae8c5a3044d3d
+
+This project contains a bounded, generated representation for UTC instants
+from 2024-01-01 through 2038-01-01.  The update script and procedure are
+documented in the project README.

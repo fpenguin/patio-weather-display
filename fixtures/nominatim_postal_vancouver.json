@@ -1,0 +1,27 @@
+[
+  {
+    "place_id": 379968290,
+    "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+    "postcode_id": "Pca:V6B_1A1",
+    "lat": "49.2838902",
+    "lon": "-123.1053023",
+    "category": "place",
+    "type": "postcode",
+    "place_rank": 21,
+    "importance": 0.12001,
+    "addresstype": "postcode",
+    "name": "V6B 1A1",
+    "display_name": "V6B 1A1, Downtown, Vancouver, Metro Vancouver Regional District, British Columbia, Canada",
+    "address": {
+      "postcode": "V6B 1A1",
+      "suburb": "Downtown",
+      "city": "Vancouver",
+      "county": "Metro Vancouver Regional District",
+      "state": "British Columbia",
+      "ISO3166-2-lvl4": "CA-BC",
+      "country": "Canada",
+      "country_code": "ca"
+    },
+    "boundingbox": ["49.2389143", "49.3288658", "-123.1740534", "-123.0365511"]
+  }
+]

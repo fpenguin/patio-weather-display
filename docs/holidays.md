@@ -1,0 +1,19 @@
+# Offline holiday calendars
+
+New setups follow the confirmed weather location. In **Settings → Holidays**, choose **Use weather location** to follow future moves, or select a separate calendar and tap **Confirm**. Existing saved choices remain in effect. Dates follow the dashboard's local clock. No key, server or additional download is required.
+
+| Selection | Coverage |
+|---|---|
+| Canada | Federal, all 10 provinces, and the Northwest Territories, Nunavut, and Yukon. Automatic mode matches English or French province/territory names and common subdivision codes. |
+| South Korea | National public holidays, including the lunar Seollal and Chuseok periods, Buddha's Birthday, substitute holidays, and election dates in the bundled data. English names. |
+| United States | Federal dates, all 50 states and DC. Includes observed dates, even when New Year's Day is observed in December of the preceding year. |
+| Boston, Denver, New York City | Selected municipal entries take precedence on the same date, then the state and federal calendars apply. Examples: Boston's Evacuation and Bunker Hill days, Denver's Sí, Se Puede Day, and New York City's Election Day. |
+| Other US cities | State and federal dates. An unrecognized state falls back to federal. No municipal coverage is inferred from a city name alone. |
+
+The Canadian, US and Korean tables cover **2026 through 2036 inclusive**. This is a snapshot of known rules; review annually and update for unexpected elections, newly proclaimed holidays or renamed days. No dates are guessed outside the range. Red means a public holiday in the displayed jurisdiction. A listed legal or public holiday is not a guarantee that every workplace or school closes. Blue marks a municipal observance or floating holiday. When only federal offices observe a date, the federal label remains visible. On coincident dates the dashboard features one entry.
+
+## Sources and updates
+
+The compact index is generated from [Vacanza holidays](https://holidays.readthedocs.io/en/latest/) with explicit local rules. Canadian checks use the [federal general-holiday standard](https://www.canada.ca/en/services/jobs/workplace/federal-labour-standards/vacations-holidays.html), the government's [province and territory employment-standards directory](https://www.canada.ca/en/immigration-refugees-citizenship/services/work-canada/worker-rights.html), and jurisdiction sources such as [BC](https://www2.gov.bc.ca/gov/content/employment-business/employment-standards-advice/employment-standards/statutory-holidays) and [Ontario](https://www.ontario.ca/document/your-guide-employment-standards-act-0/public-holidays). Check Korean changes against the [Ministry of Personnel Management](https://www.mpm.go.kr/english/system/infoService/bizService03/) and the [national annual dates](https://customs.go.kr/engportal/cm/cntnts/cntntsView.do?cntntsId=7401&mi=13284). US checks include [OPM's observed-date rules](https://www.opm.gov/policy-data-oversight/pay-leave/work-schedules/fact-sheets/Federal-Holidays-In-Lieu-Of-Determination), [California's Farmworkers Day change](https://www.gov.ca.gov/2026/03/26/governor-newsom-signs-legislation-3-26-26/), [Boston city holidays](https://www.boston.gov/departments/311/city-boston-holidays), [Massachusetts' Suffolk County observances](https://www.mass.gov/info-details/mass-general-laws-c4-ss-7), [Denver closures](https://www.denvergov.org/Events-directory/Holiday-Closures/S%C3%AD-Se-Puede-Day), and [NYC's published calendar](https://www.nyc.gov/assets/opa/downloads/pdf/2026-holiday-pay-calendar.pdf).
+
+To reproduce the bundled table, install `holidays==0.108` in a Python virtual environment and run `python scripts/generate_holidays.py`. Normal firmware and host builds use the checked-in data and need no Python holiday library. Run the core, persistence and LVGL UI tests after editing calendar data or changing regional matching.

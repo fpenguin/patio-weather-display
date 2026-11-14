@@ -1,0 +1,24 @@
+{
+  "place_id": 374150216,
+  "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+  "osm_type": "relation",
+  "osm_id": 1852574,
+  "lat": "49.2608724",
+  "lon": "-123.1139520",
+  "category": "boundary",
+  "type": "administrative",
+  "place_rank": 16,
+  "importance": 0.742015597,
+  "addresstype": "city",
+  "name": "Vancouver",
+  "display_name": "Vancouver, Metro Vancouver Regional District, British Columbia, Canada",
+  "address": {
+    "city": "Vancouver",
+    "county": "Metro Vancouver Regional District",
+    "state": "British Columbia",
+    "ISO3166-2-lvl4": "CA-BC",
+    "country": "Canada",
+    "country_code": "ca"
+  },
+  "boundingbox": ["49.1989306", "49.3161714", "-123.2249611", "-123.0232419"]
+}

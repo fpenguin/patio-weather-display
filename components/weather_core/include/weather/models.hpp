@@ -250,8 +250,11 @@ enum class AdviceKind : std::uint8_t {
     OfficialAlert,
 };
 
+enum class Severity : std::uint8_t { None, Caution, Warning, Danger };
+
 struct Advice {
     AdviceKind kind{AdviceKind::WeatherUnavailable};
+    Severity severity{Severity::None};
     int priority{0};
     Text<72> headline{};
     Text<112> supporting{};
@@ -272,6 +275,8 @@ struct DashboardModel {
     Optional<Holiday> featured_holiday{};
     Advice advice{};
     bool fixture_mode{false};
+    // A failed refresh is independent of the age of the last successful forecast.
+    bool weather_update_delayed{false};
 };
 
 }  // namespace patio

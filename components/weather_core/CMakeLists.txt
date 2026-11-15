@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "src/rainfall.cpp"
         "src/timeline.cpp"
+        "src/forecast_refresh.cpp"
         "src/advice.cpp"
         "src/holidays.cpp"
         "src/validation.cpp"

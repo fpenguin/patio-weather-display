@@ -2,6 +2,7 @@
 #include "weather/proximity.hpp"
 #include "weather/public_location.hpp"
 #include "weather/holidays.hpp"
+#include "weather/severity.hpp"
 #include "weather/advice.hpp"
 #include "weather/rainfall.hpp"
 #include "weather/timeline.hpp"
@@ -396,6 +397,7 @@ struct WeatherUi {
     lv_obj_t * date_label{nullptr};
     lv_obj_t * clock_label{nullptr};
     lv_obj_t * ampm_label{nullptr};
+    lv_obj_t * advice_subtitle{nullptr};
     lv_obj_t * now_layer{nullptr};
     lv_obj_t * axis_note{nullptr};
     lv_obj_t * keyboard{nullptr};
@@ -411,6 +413,7 @@ struct WeatherUi {
     int dashboard_date_key{0};
     bool day_rollover_pending{false};
     int rail_y{kChartBaseline};
+    std::int64_t next_wind_change_utc{0};
     struct AmountPosition { lv_obj_t* object; int16_t left,width,normal,raised; };
     // At most 19 hourly intervals intersect the axis (fractional time zones),
     // with a separate rain and snow label for each.
@@ -431,6 +434,7 @@ void clear_screen(WeatherUi * ui)
     ui->date_label = nullptr;
     ui->clock_label = nullptr;
     ui->ampm_label = nullptr;
+    ui->advice_subtitle = nullptr;
     ui->now_layer = nullptr;
     ui->axis_note = nullptr;
     ui->amount_count = 0;
@@ -509,7 +513,7 @@ void format_time(const WeatherUi * ui, char * clock, std::size_t clock_size,
 void format_date(const WeatherUi * ui, char * buffer, std::size_t size)
 {
     if(!ui->dashboard.clock_synchronized || !ui->dashboard.local_now.valid) {
-        std::snprintf(buffer, size, "WAITING FOR LOCAL TIME");
+        std::snprintf(buffer, size, "SYNCING TIME");
         return;
     }
     const CivilTime & now = ui->dashboard.local_now;
@@ -520,51 +524,32 @@ void format_date(const WeatherUi * ui, char * buffer, std::size_t size)
 IconKind advice_icon(AdviceKind kind)
 {
     switch(kind) {
-        case AdviceKind::Dry: return IconKind::partly_cloudy;
+        case AdviceKind::Dry: return IconKind::jacket;
         case AdviceKind::Rain: return IconKind::umbrella;
         case AdviceKind::HeavyRain: return IconKind::rain;
         case AdviceKind::StrongWind: return IconKind::wind;
         case AdviceKind::Ice: return IconKind::ice;
-        case AdviceKind::Snow: return IconKind::snow;
+        case AdviceKind::Snow: return IconKind::boot;
         case AdviceKind::Thunderstorm: return IconKind::lightning;
         case AdviceKind::Heat: return IconKind::thermometer_hot;
         case AdviceKind::Cold: return IconKind::thermometer_cold;
         case AdviceKind::PoorAirQuality: return IconKind::wind;
-        case AdviceKind::HighUv: return IconKind::sun;
+        case AdviceKind::HighUv: return IconKind::sun_hat;
         case AdviceKind::WeatherUnavailable: return IconKind::refresh;
         case AdviceKind::OfficialAlert: return IconKind::alert;
     }
     return IconKind::alert;
 }
 
-void advice_palette(const Advice & advice, lv_color_t * surface, lv_color_t * end, lv_color_t * accent)
-{
-    switch(advice.kind) {
-        case AdviceKind::Dry:
-            *surface = lv_color_hex(0x16323D); *end = *surface; *accent = c_secondary(); break;
-        case AdviceKind::Rain:
-        case AdviceKind::HeavyRain:
-        case AdviceKind::StrongWind:
-        case AdviceKind::HighUv:
-            *surface = lv_color_hex(0x242726); *end = *surface; *accent = lv_color_hex(0xF8B750); break;
-        case AdviceKind::Ice:
-        case AdviceKind::Snow:
-        case AdviceKind::Cold:
-            *surface = lv_color_hex(0x203442); *end = lv_color_hex(0x1A303E); *accent = lv_color_hex(0xB9E2FA); break;
-        case AdviceKind::PoorAirQuality:
-            *surface = lv_color_hex(0x4A2530); *end = lv_color_hex(0x3B202A); *accent = lv_color_hex(0xEDA4B5); break;
-        case AdviceKind::OfficialAlert:
-            if (!advice.urgent) {
-                *surface = lv_color_hex(0x302C22); *end = lv_color_hex(0x272820); *accent = c_caution(); break;
-            }
-            [[fallthrough]];
-        case AdviceKind::Thunderstorm:
-            *surface = lv_color_hex(0x47262A); *end = lv_color_hex(0x382126); *accent = c_urgent(); break;
-        case AdviceKind::Heat:
-            *surface = lv_color_hex(0x3B3022); *end = lv_color_hex(0x332B21); *accent = lv_color_hex(0xFFAD52); break;
-        case AdviceKind::WeatherUnavailable:
-            *surface = lv_color_hex(0x2A3842); *end = lv_color_hex(0x23323C); *accent = c_primary(); break;
+struct HazardStyle { uint32_t accent, surface; const char* label; };
+HazardStyle hazard_style(Severity severity) {
+    switch(severity) {
+        case Severity::Caution: return {0xF2CA52,0x292922,"CAUTION"};
+        case Severity::Warning: return {0xFFA354,0x302821,"WARNING"};
+        case Severity::Danger:  return {0xFF6875,0x37242C,"DANGER"};
+        case Severity::None:    break;
     }
+    return {0xF2F5F7,0x14333D,""};
 }
 
 int text_px(const char* text, const lv_font_t* font)
@@ -617,7 +602,7 @@ void make_home_header(WeatherUi* ui, const DaySummary& day)
     std::snprintf(low, sizeof(low), "Low %s", value);
     const auto* f = &patio_semibold_26;
     int hx = 644;
-    make_label(root, high, f, lv_color_hex(0xF1A079), hx, 72);
+    make_label(root, high, f, c_secondary(), hx, 72);
     hx += text_px(high,f) + 7;
     make_label(root, "•", f, c_primary(), hx, 72);
     make_label(root, low, f, c_secondary(), hx + text_px("•",f) + 7, 72);
@@ -625,35 +610,37 @@ void make_home_header(WeatherUi* ui, const DaySummary& day)
     const auto& aq = ui->dashboard.air_quality;
     char badge[72] = "Air quality unavailable";
     uint32_t bg = 0x29434F;
+    auto badge_ink = c_primary();
     if((aq.status.state == SourceState::Fresh || aq.status.state == SourceState::Stale) && aq.display_index.valid) {
         const int n = aq.display_index.value;
         if(aq.scale == "US AQI") {
-            std::snprintf(badge, sizeof(badge), "US AQI %d%s", n, aq.status.state == SourceState::Stale ? " • Stale" : "");
-            bg = n <= 50 ? 0x3B6583 : n <= 100 ? 0x66552A : n <= 150 ? 0x824C2D :
-                 n <= 200 ? 0x84343C : n <= 300 ? 0x633963 : 0x681F37;
+            const char* category=n<=50?"Good":n<=100?"Moderate":n<=150?"Sensitive groups":
+                                 n<=200?"Unhealthy":n<=300?"Very unhealthy":"Hazardous";
+            std::snprintf(badge, sizeof(badge), "US AQI %d • %s%s", n, category, aq.status.state == SourceState::Stale ? " • Stale" : "");
         } else {
             char index[12];
             if(aq.display_ten_plus) std::snprintf(index,sizeof(index),"10+");
             else std::snprintf(index,sizeof(index),"%d",n);
             std::snprintf(badge, sizeof(badge), "AQHI %s • %s%s", index, aqhi_category_text(aq.category),
                           aq.status.state == SourceState::Stale ? " • Stale" : "");
-            bg = aq.category == AqhiCategory::VeryHigh ? 0x751733 : aq.category == AqhiCategory::High ? 0x87383C :
-                 aq.category == AqhiCategory::Moderate ? 0x66552A : 0x3B6482;
         }
+        const auto level=air_impact(aq);
+        bg=level==Severity::None ? 0x3B6482 : hazard_style(level).accent;
+        if (level!=Severity::None) badge_ink=lv_color_hex(0x102333);
     }
     auto* bf = text_px(badge,&patio_bold_20) <= 322 ? &patio_bold_20 : &lv_font_montserrat_16;
     const int bw = std::max(186,text_px(badge,bf) + 26);
     auto* pill = make_box(root, 644, 111, bw, 35, lv_color_hex(bg), 18);
-    make_label(pill, badge, bf, c_primary(), 0, (35-bf->line_height)/2, bw, bf->line_height, LV_TEXT_ALIGN_CENTER);
+    make_label(pill, badge, bf, badge_ink, 0, (35-bf->line_height)/2, bw, bf->line_height, LV_TEXT_ALIGN_CENTER);
     auto* gear = make_button(root, 959, 3, 59, 56, c_bg_top(), 8);
     lv_obj_set_style_bg_opa(gear, LV_OPA_TRANSP, 0);
     make_label(gear, LV_SYMBOL_SETTINGS, &lv_font_montserrat_36, c_secondary(), 0, 5, 59, 46, LV_TEXT_ALIGN_CENTER);
     bind_action(ui, gear, ActionKind::HomeSettings);
-    if(w.status.state == SourceState::Stale) {
-        auto* tag = make_box(root, 260, 15, 146, 23, lv_color_hex(0x57411F), 7);
-        make_label(tag,"STALE FORECAST",&patio_bold_14,c_caution(),0,2,146,19,LV_TEXT_ALIGN_CENTER);
+    if(w.status.state == SourceState::Stale || (w.status.state==SourceState::Fresh && ui->dashboard.weather_update_delayed)) {
+        const bool stale=w.status.state==SourceState::Stale;
+        auto* tag = make_box(root, 245, 15, 164, 23, lv_color_hex(stale?0x57411F:0x203B48), 7);
+        make_label(tag,stale?"STALE FORECAST":"UPDATE DELAYED",&patio_bold_14,stale?c_caution():c_secondary(),0,2,164,19,LV_TEXT_ALIGN_CENTER);
     }
-    make_line(root, 20, 166, 984, 2, c_divider());
 }
 
 bool make_holiday(WeatherUi* ui)
@@ -661,17 +648,23 @@ bool make_holiday(WeatherUi* ui)
     if(ui->day_rollover_pending || !ui->have_dashboard || !ui->dashboard.featured_holiday.valid) return false;
     const auto& h = ui->dashboard.featured_holiday.value;
     char region[80]; std::snprintf(region,sizeof(region),"in %s",h.jurisdiction.c_str());
-    auto* f = &patio_bold_20;
-    if(text_px("Today is",f) + text_px(h.name.c_str(),f) + text_px(region,f) > 920) f = &lv_font_montserrat_16;
-    const int bx = 32 + text_px("Today is",f) + 10;
-    const int bw = std::min(986-bx, text_px(h.name.c_str(),f) + 20);
-    make_label(ui->root,"Today is",f,c_primary(),32,174);
-    auto* pill = make_box(ui->root,bx,170,bw,30,h.configured_day_off ? c_red() : c_observance(),8);
+    const int left=75, right=1000;
+    auto* f = &patio_bold_24;
+    auto need=[&](){ return text_px("Today is",f)+text_px(h.name.c_str(),f)+text_px(region,f)+40; };
+    if(need()>right-left) f=&patio_bold_20;
+    if(need()>right-left) f=&lv_font_montserrat_16;
+    if(need()>right-left) f=&patio_bold_14;
+    const int bx = left + text_px("Today is",f) + 10;
+    const int bw = std::min(right-bx, text_px(h.name.c_str(),f) + 20);
+    auto* calendar=create_icon(ui->root,IconKind::calendar,32,c_secondary());
+    lv_obj_set_pos(calendar,27,164);
+    make_label(ui->root,"Today is",f,c_primary(),left,170);
+    auto* pill = make_box(ui->root,bx,166,bw,35,h.configured_day_off ? c_red() : c_observance(),8);
     auto* name = make_label(pill,h.name.c_str(),f,c_primary(),10,4,bw-20,f->line_height);
     lv_label_set_long_mode(name,LV_LABEL_LONG_DOT);
     const int x = bx+bw+10;
-    if(x < 945 && !h.jurisdiction.empty()) {
-        auto* label = make_label(ui->root,region,f,c_secondary(),x,174,998-x,f->line_height);
+    if(x < right && !h.jurisdiction.empty()) {
+        auto* label = make_label(ui->root,region,f,c_secondary(),x,170,right-x,f->line_height);
         lv_label_set_long_mode(label,LV_LABEL_LONG_DOT);
     }
     return true;
@@ -735,24 +728,39 @@ const char* exposure_label(Exposure e) {
     }
 }
 
-void wind_run(WeatherUi* ui, Exposure e, int from, int to) {
+void wind_run(WeatherUi* ui, Exposure e, Severity level, int from, int to, std::int64_t expires) {
     const int x=axis_x(from), w=axis_x(to)-x;
-    if(w<=1 || e==Exposure::Unknown) return;
-    const bool storm=e==Exposure::Storm || e==Exposure::Hail;
-    auto* bg=make_box(ui->root,x,353,w-1,30,
-        lv_color_hex(storm ? 0x744451 : e==Exposure::Strong ? 0x496F8F : e==Exposure::Breezy ? 0x7193A9 : 0xA3C3D6),
-        std::min(8,w/4));
-    const char* word=exposure_label(e);
+    if(w<=1 || e==Exposure::Unknown || e==Exposure::Light) return;
+    if(!ui->next_wind_change_utc || expires<ui->next_wind_change_utc) ui->next_wind_change_utc=expires;
+    const auto ink=lv_color_hex(0x102333);
+    auto* bg=make_box(ui->root,x,353,w-1,30,lv_color_hex(hazard_style(level).accent),std::min(6,w/4));
+    const auto symbol = e==Exposure::Storm ? IconKind::lightning : e==Exposure::Hail ? IconKind::ice : IconKind::wind;
+    const char* word=e==Exposure::Strong && level==Severity::Danger ? "SEVERE" : exposure_label(e);
     const lv_font_t* font=&patio_bold_20;
     if(text_px(word,font)+4>w) font=&patio_bold_14;
     if(text_px(word,font)+2>w) {
         if(e==Exposure::Storm) word="Storm";
         else if(e==Exposure::Breezy) word="Breezy";
-        else if(e==Exposure::Strong) word="Strong";
+        else if(e==Exposure::Strong) word=level==Severity::Danger?"Severe":"Strong";
     }
-    if(text_px(word,font)<=w)
-        make_label(bg,word,font,storm || e==Exposure::Strong ? c_primary() : lv_color_hex(0x0A2531),
-                   0,(30-font->line_height)/2,w-1,font->line_height,LV_TEXT_ALIGN_CENTER);
+    int tracking=0, tw=text_px(word,font);
+    // A single hour is about 49 pixels. Keep its severity readable without
+    // relying on color or on two identical wind pictograms.
+    while(tw+1>=w && tracking>-2) {
+        --tracking;
+        tw=lv_txt_get_width(word,std::strlen(word),font,tracking,LV_TEXT_FLAG_NONE);
+    }
+    const bool with_icon=tw+30<w;
+    if(with_icon || tw+1>=w) {
+        const int size=std::min(24,w-1);
+        auto* icon=create_icon(bg,symbol,size,ink);
+        lv_obj_set_pos(icon,with_icon?(w-tw-28)/2:(w-size)/2,(30-size)/2);
+    }
+    if(tw+1<w) {
+        auto* label=make_label(bg,word,font,ink,with_icon?26:0,(30-font->line_height)/2,
+                               w-1-(with_icon?26:0),font->line_height,LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_style_text_letter_space(label,tracking,0);
+    }
 }
 
 void chart_value(WeatherUi* ui, ChartInk& ink, int x, int y, int top, float amount, const char* unit) {
@@ -787,8 +795,8 @@ void make_chart(WeatherUi* ui, const DaySummary& day, bool holiday)
 {
     auto* root=ui->root;
     const auto& d=ui->dashboard;
-    const int top=holiday?202:174, base=holiday?300:kChartBaseline;
-    ui->rail_y=base;
+    const int top=holiday?216:174;
+    ui->next_wind_change_utc=0;
     const int today=date_key(d.local_now);
     auto visible=[&](const HourlyWeather& h) {
         return has_weather(ui) && h.local_date_key==today && h.local_end_minute>kTimelineStartMinute &&
@@ -796,7 +804,11 @@ void make_chart(WeatherUi* ui, const DaySummary& day, bool holiday)
     };
     const auto n=std::min(d.weather.hour_count,d.weather.hours.size());
     float rain_peak=0,snow_peak=0;
-    bool has_wind=false,has_storm=false,has_uv=false,has_hour=false,complete=true;
+    bool has_wind=false,wind_gap=false,impact_wind=false,has_storm=false,has_uv=false,has_hour=false,complete=true;
+    int wind_cursor=std::clamp(d.local_now.hour*60+d.local_now.minute,kTimelineStartMinute,kTimelineEndMinute);
+    auto revisit=[&](std::int64_t at) {
+        if(at>d.now_utc && (!ui->next_wind_change_utc || at<ui->next_wind_change_utc)) ui->next_wind_change_utc=at;
+    };
     bool cloudy=false,clear=false,snow_code=false,wet_code=false,fog=false;
     bool dense_labels=false, mixed_labels=false;
     int cursor=kTimelineStartMinute;
@@ -811,8 +823,16 @@ void make_chart(WeatherUi* ui, const DaySummary& day, bool holiday)
         rain_peak=std::max(rain_peak,rain.millimetres);
         if(h.snowfall_cm.valid) snow_peak=std::max(snow_peak,h.snowfall_cm.value);
         const auto e=outdoor_exposure(h);
-        has_wind|=e!=Exposure::Unknown;
-        has_storm|=e==Exposure::Storm || e==Exposure::Hail;
+        if(h.interval_end_utc>d.now_utc) {
+            if(h.local_start_minute>wind_cursor) { wind_gap=true; revisit(h.interval_start_utc); }
+            if(e==Exposure::Unknown || (e==Exposure::Light && (!h.wind_kmh.valid || !h.gust_kmh.valid))) {
+                wind_gap=true; revisit(h.interval_end_utc);
+            }
+            wind_cursor=std::max(wind_cursor,h.local_end_minute);
+            has_wind|=e!=Exposure::Unknown;
+            impact_wind|=e!=Exposure::Unknown && e!=Exposure::Light;
+            has_storm|=e==Exposure::Storm || e==Exposure::Hail;
+        }
         if(h.weather_code.valid && h.interval_end_utc>d.now_utc) {
             int code=h.weather_code.value;
             cloudy|=code==2 || code==3; clear|=code==0 || code==1;
@@ -820,20 +840,35 @@ void make_chart(WeatherUi* ui, const DaySummary& day, bool holiday)
             wet_code|=(code>=51 && code<=67) || (code>=80 && code<=82);
         }
     }
+    wind_gap=has_hour && (wind_gap || wind_cursor<kTimelineEndMinute);
+    const bool show_row=impact_wind || wind_gap;
+    const int base=show_row?(holiday?302:kChartBaseline):338;
+    ui->rail_y=base;
     ChartInk ink, bars;
     Exposure active=Exposure::Unknown;
+    Severity active_level=Severity::None,uv_level=Severity::None;
+    std::int64_t wind_until=0;
+    float uv_peak=0;
     int wind_start=360,wind_end=360,uv_start=-1,uv_end=-1;
     auto uv_run=[&]() {
         if(uv_start<0) return;
         const int x=axis_x(uv_start)+1,w=axis_x(uv_end)-x-1;
         if(w>2) {
-            auto* band=make_box(root,x,base-29,w,29,lv_color_hex(0x54492A),4);
-            const char* caption=w>98?"High UV":"UV";
-            if(w>=text_px(caption,&patio_bold_14)) make_label(band,caption,&patio_bold_14,
-                lv_color_hex(0xF2C46B),0,5,w,20,LV_TEXT_ALIGN_CENTER);
-            bars.reserve(x,base-29,w,29);
+            constexpr int height=42;
+            auto* band=make_box(root,x,base-height,w,height,lv_color_hex(hazard_style(uv_level).accent),4);
+            char caption[30];
+            const char* uv_name=uv_peak>=11?"EXTREME UV":uv_peak>=8?"VERY HIGH UV":uv_peak>=6?"HIGH UV":"UV";
+            std::snprintf(caption,sizeof(caption),"%s • %ld",uv_name,std::lround(uv_peak));
+            auto* font=&patio_bold_20;
+            if(w<text_px(caption,font)+6) font=&patio_bold_14;
+            if(w<text_px(caption,font)+4) std::snprintf(caption,sizeof(caption),"UV %ld",std::lround(uv_peak));
+            const int tw=text_px(caption,font), icon=tw+28<=w?22:0, left=(w-tw-icon)/2;
+            if(icon) lv_obj_set_pos(create_icon(band,IconKind::sun,icon,lv_color_hex(0x102333)),left-1,(height-icon)/2);
+            if(tw<=w) make_label(band,caption,font,lv_color_hex(0x102333),left+icon,(height-font->line_height)/2,
+                                  tw,font->line_height,LV_TEXT_ALIGN_CENTER);
+            bars.reserve(x,base-height,w,height);
         }
-        uv_start=-1;
+        uv_start=-1; uv_peak=0; uv_level=Severity::None;
     };
     const int usable_h=base-top-(mixed_labels?72:dense_labels?45:24);
     for(std::size_t i=0;i<n;++i) {
@@ -851,6 +886,9 @@ void make_chart(WeatherUi* ui, const DaySummary& day, bool holiday)
             const auto c=lv_color_hex(frozen ? (past?0x7295A8:0xC6E2EE) :
                 past?0x577A8A:(a==peak?0xA7CDE3:0x648CA4));
             make_box(root,left,base-bh,width,bh+2,c,3);
+            auto level=frozen?snow_impact(a,0):rain_impact(a,0,ui->settings.thresholds);
+            if(!past && level!=Severity::None && (level>=Severity::Warning || a>=2))
+                make_line(root,left,base-bh,width,std::min(5,bh),lv_color_hex(hazard_style(level).accent));
             bars.reserve(left,base-bh,width,bh);
             if(a>limit) make_line(root,left,base-bh,width,2,c_primary());
             chart_value(ui,ink,left+width/2,base-bh,top,a,frozen?"cm":"mm");
@@ -863,29 +901,44 @@ void make_chart(WeatherUi* ui, const DaySummary& day, bool holiday)
         if(!rain.valid && !snow && w>5) make_line(root,x+3,base-9,w-6,2,lv_color_hex(0x687782));
         const bool uv=ui->settings.uv_advice_enabled && !wet && rain.valid && h.uv_index.valid &&
                       h.uv_index.value>=ui->settings.thresholds.high_uv_index;
-        if(uv_start>=0 && (!uv || from!=uv_end)) uv_run();
-        if(uv) { has_uv=true; if(uv_start<0) uv_start=from; uv_end=to; }
-        const auto e=outdoor_exposure(h);
-        if(active!=e || from!=wind_end) {
-            wind_run(ui,active,wind_start,wind_end);
-            active=e; wind_start=from;
+        const Severity hour_uv=uv?uv_impact(h.uv_index.value,ui->settings.thresholds):Severity::None;
+        if(uv_start>=0 && (!uv || from!=uv_end || uv_level!=hour_uv)) uv_run();
+        if(uv) { has_uv=true; if(uv_start<0) uv_start=from; uv_end=to; uv_level=hour_uv; uv_peak=std::max(uv_peak,h.uv_index.value); }
+        const auto e=h.interval_end_utc>d.now_utc ? outdoor_exposure(h) : Exposure::Unknown;
+        const auto level=e==Exposure::Storm || e==Exposure::Hail ? Severity::Danger :
+                        wind_impact(h.wind_kmh.valid?h.wind_kmh.value:0,h.gust_kmh.valid?h.gust_kmh.value:0);
+        if(active!=e || active_level!=level || from!=wind_end) {
+            wind_run(ui,active,active_level,wind_start,wind_end,wind_until);
+            active=e; active_level=level; wind_start=from;
         }
-        wind_end=to;
+        wind_end=to; wind_until=h.interval_end_utc;
     }
     uv_run();
-    wind_run(ui,active,wind_start,wind_end);
+    wind_run(ui,active,active_level,wind_start,wind_end,wind_until);
     for(unsigned i=0;i<bars.count && ink.count<ink.placed.size();++i) ink.placed[ink.count++]=bars.placed[i];
     if(!has_hour) {
         make_label(root,ui->day_rollover_pending ? "Updating today's forecast" : "Hourly forecast unavailable",
                    &lv_font_montserrat_20,c_secondary(),200,base-53,624,28,LV_TEXT_ALIGN_CENTER);
-    } else if(rain_peak<0.05f && snow_peak<0.05f && !has_uv) {
+    } else if(rain_peak<0.05f && snow_peak<0.05f) {
+        const bool now_cloud=d.weather.current_weather_code.valid && d.weather.current_weather_code.value==3;
+        const bool daylight_now=day.sun==DaySummary::PolarDay || (day.sun==DaySummary::Events &&
+            (day.rise<day.set ? d.local_now.hour*60+d.local_now.minute>=day.rise && d.local_now.hour*60+d.local_now.minute<day.set :
+             d.local_now.hour*60+d.local_now.minute>=day.rise || d.local_now.hour*60+d.local_now.minute<day.set));
+        const bool now_sun=d.weather.current_weather_code.valid && d.weather.current_weather_code.value<=1 && daylight_now;
         const char* summary=!complete || cursor<kTimelineEndMinute ? "Precipitation data incomplete" :
             snow_code ? "Snow possible" : wet_code ? "Rain possible" : has_storm ? "Thunderstorm risk" :
-            fog ? "Fog possible" : cloudy && clear ? "Variable cloud cover" : cloudy ? "Cloudy skies" :
+            fog ? "Fog possible" : now_sun ? "Sunny" : now_cloud ? "Cloudy" : cloudy && clear ? "Variable cloud cover" : cloudy ? "Cloudy skies" :
             clear ? "Mostly clear" : "Dry through midnight";
-        const int w=text_px(summary,&lv_font_montserrat_20),x=(1024-w)/2,y=base-49;
-        make_label(root,summary,&lv_font_montserrat_20,c_secondary(),x,y);
-        ink.reserve(x,y,w,25);
+        const bool symbol=!std::strcmp(summary,"Sunny") || !std::strcmp(summary,"Cloudy");
+        const auto* font=has_uv && symbol ? &patio_semibold_26 : &lv_font_montserrat_20;
+        const int w=text_px(summary,font),x=has_uv?85:(1024-w)/2,y=has_uv?top:base-47;
+        make_label(root,summary,font,c_secondary(),x,y);
+        ink.reserve(x,y,w,font->line_height);
+        if(symbol) {
+            const int size=has_uv?42:62, ix=has_uv?32:(1024-size)/2, iy=has_uv?top-4:y-size;
+            auto* icon=create_icon(root,now_sun?IconKind::sun:IconKind::cloud,size,c_secondary());
+            lv_obj_set_pos(icon,ix,iy); ink.reserve(ix,iy,size,size);
+        }
     }
     const auto sun=lv_color_hex(0xFAC33B);
     make_line(root,32,base-2,960,4,c_primary());
@@ -911,9 +964,11 @@ void make_chart(WeatherUi* ui, const DaySummary& day, bool holiday)
             make_label(root,text,&lv_font_montserrat_20,c_primary(),std::clamp(x-w/2,16,1008-w),base+12);
         }
     }
-    make_label(root,has_storm?"RISK":"WIND",&patio_bold_20,c_primary(),4,355,64,28,LV_TEXT_ALIGN_CENTER);
-    make_line(root,68,352,1,31,c_divider());
-    if(!has_wind) make_label(root,"Wind unavailable",&lv_font_montserrat_20,c_secondary(),83,355);
+    if(show_row) {
+        make_label(root,has_storm?"RISK":"WIND",&patio_bold_20,c_primary(),4,355,64,28,LV_TEXT_ALIGN_CENTER);
+        make_line(root,68,352,1,31,c_divider());
+        if(!impact_wind) make_label(root,has_wind?"Wind data incomplete":"Wind unavailable",&lv_font_montserrat_20,c_secondary(),83,355);
+    }
     make_line(root,20,407,984,2,c_divider());
 }
 
@@ -937,21 +992,22 @@ void finish_retry_feedback(lv_timer_t * timer)
     if(ui->screen == ScreenKind::Home) render_home(ui);
 }
 
+void set_advice_subtitle(lv_obj_t* label, const Advice& advice);
+
 void make_advice_banner(WeatherUi * ui)
 {
     Advice advice;
     if(ui->have_dashboard) advice = ui->dashboard.advice;
     if(!ui->have_dashboard || ui->day_rollover_pending) {
         advice.kind = AdviceKind::WeatherUnavailable;
+        advice.severity = Severity::None;
         advice.headline.assign(ui->day_rollover_pending ? "Updating today's forecast" : "Forecast needs updating");
         advice.supporting.assign("Weather information is temporarily unavailable");
     }
 
-    lv_color_t surface{};
-    lv_color_t end{};
-    lv_color_t accent{};
-    advice_palette(advice, &surface, &end, &accent);
-    lv_obj_t * banner = make_gradient_box(ui->root, 18, 430, 988, 134, surface, end, 13, LV_GRAD_DIR_HOR);
+    const auto style=hazard_style(advice.severity);
+    const auto accent=lv_color_hex(style.accent);
+    lv_obj_t * banner = make_box(ui->root, 18, 430, 988, 134, lv_color_hex(style.surface), 13);
     if(ui->have_dashboard && (advice.kind == AdviceKind::OfficialAlert || advice.additional_alert_count > 0)) {
         lv_obj_add_flag(banner, LV_OBJ_FLAG_CLICKABLE);
         bind_action(ui, banner, ActionKind::AdviceDetails);
@@ -966,7 +1022,8 @@ void make_advice_banner(WeatherUi * ui)
         make_label(button, caption, &lv_font_montserrat_16, c_primary(), 1, 71, 110, 22, LV_TEXT_ALIGN_CENTER);
         bind_action(ui, button, ActionKind::RecoverData);
     } else {
-        lv_obj_t * icon = create_icon(banner, advice_icon(advice.kind), 99, accent);
+        lv_obj_t * icon = create_icon(banner, advice_icon(advice.kind), 99,
+                                      advice.severity==Severity::None ? c_secondary() : accent);
         lv_obj_set_pos(icon, 14, 17);
         lv_obj_clear_flag(icon, LV_OBJ_FLAG_CLICKABLE);
     }
@@ -977,9 +1034,35 @@ void make_advice_banner(WeatherUi * ui)
     const lv_font_t * headline_font = &patio_bold_40;
     if(text_px(headline,headline_font)>text_width) headline_font=&lv_font_montserrat_32;
     if(text_px(headline,headline_font)>text_width) headline_font=&patio_bold_24;
-    auto* title=make_label(banner, headline, headline_font, accent, 148, 64-headline_font->line_height,
+    const bool hazard=advice.severity!=Severity::None;
+    if(hazard) make_label(banner,style.label,&patio_bold_20,c_primary(),148,7);
+    auto* title=make_label(banner, headline, headline_font, accent, 148, (hazard?80:67)-headline_font->line_height,
                            text_width, headline_font->line_height);
     lv_label_set_long_mode(title,LV_LABEL_LONG_DOT);
+    ui->advice_subtitle = make_label(banner, "", &patio_semibold_26, c_secondary(), 148, hazard?87:77, text_width,
+                                     lv_font_get_line_height(&patio_semibold_26));
+    lv_label_set_long_mode(ui->advice_subtitle, LV_LABEL_LONG_CLIP);
+    set_advice_subtitle(ui->advice_subtitle, advice);
+    if(advice.additional_alert_count > 0) {
+        char extra[32];
+        std::snprintf(extra, sizeof(extra), "+%u alert%s",
+                      static_cast<unsigned>(advice.additional_alert_count),
+                      advice.additional_alert_count == 1 ? "" : "s");
+        Severity other=Severity::None;
+        for(std::size_t i=0;i<std::min(ui->dashboard.alerts.count,ui->dashboard.alerts.alerts.size());++i) {
+            const auto& a=ui->dashboard.alerts.alerts[i];
+            if(i!=advice.primary_alert_index && alert_active_at(a,ui->dashboard.now_utc))
+                other=std::max(other,official_impact(a));
+        }
+        const auto badge_style=hazard_style(other);
+        lv_obj_t * badge = make_box(banner, 850, 34, 120, 42, lv_color_hex(badge_style.surface), 18);
+        lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICKABLE);
+        make_label(badge, extra, &lv_font_montserrat_20, lv_color_hex(badge_style.accent), 4, 7, 112, 27, LV_TEXT_ALIGN_CENTER);
+    }
+}
+
+void set_advice_subtitle(lv_obj_t* label, const Advice& advice) {
+    const lv_coord_t text_width = lv_obj_get_style_width(label, LV_PART_MAIN);
     char subtitle[240]{};
     std::snprintf(subtitle, sizeof(subtitle), "%s%s%s", advice.supporting.c_str(),
                   !advice.supporting.empty() && !advice.second_line.empty() ? " / " : "",
@@ -1006,20 +1089,15 @@ void make_advice_banner(WeatherUi * ui)
             // The header already shows STALE FORECAST; prioritize the advice.
             line = advice.supporting.empty() ? subtitle : advice.supporting.c_str();
         }
+        // Keep both forecast windows even beside an alert badge.
+        if(advice.kind == AdviceKind::Rain && !fits(line)) font = &lv_font_montserrat_16;
         if(!fits(line) || std::strpbrk(line, "\r\n")) line = "Check the forecast details.";
     }
-    auto* sub = make_label(banner, line, font, c_secondary(), 148, 74,
-                           text_width, lv_font_get_line_height(font));
-    lv_label_set_long_mode(sub, LV_LABEL_LONG_CLIP);
-    if(advice.additional_alert_count > 0) {
-        char extra[32];
-        std::snprintf(extra, sizeof(extra), "+%u alert%s",
-                      static_cast<unsigned>(advice.additional_alert_count),
-                      advice.additional_alert_count == 1 ? "" : "s");
-        lv_obj_t * badge = make_box(banner, 850, 34, 120, 42, lv_color_hex(0x512834), 18);
-        lv_obj_clear_flag(badge, LV_OBJ_FLAG_CLICKABLE);
-        make_label(badge, extra, &lv_font_montserrat_20, c_primary(), 4, 7, 112, 27, LV_TEXT_ALIGN_CENTER);
+    if(lv_obj_get_style_text_font(label, LV_PART_MAIN) != font) {
+        lv_obj_set_style_text_font(label, font, LV_PART_MAIN);
+        lv_obj_set_height(label, lv_font_get_line_height(font));
     }
+    lv_label_set_text(label, line);
 }
 
 void refresh_clock_labels(WeatherUi * ui)
@@ -1067,7 +1145,7 @@ void refresh_now_overlay(WeatherUi* ui)
 {
     if(!ui || ui->screen!=ScreenKind::Home) return;
     if(!ui->now_layer) {
-        ui->axis_note=make_label(ui->root,"",&patio_bold_14,c_secondary(),32,327);
+        ui->axis_note=make_label(ui->root,"",&patio_bold_14,c_secondary(),32,ui->rail_y+40);
         ui->now_layer=plain_object(ui->root);
         lv_obj_clear_flag(ui->now_layer,LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_size(ui->now_layer,41,33);
@@ -1104,6 +1182,7 @@ void render_home(WeatherUi * ui)
                                                   ui->dashboard.location.time_zone.c_str()) : DaySummary{};
     make_home_header(ui,day);
     const bool holiday=make_holiday(ui);
+    make_line(ui->root,20,holiday?207:166,984,2,c_divider());
     make_chart(ui,day,holiday);
     make_advice_banner(ui);
     refresh_now_overlay(ui);
@@ -1997,11 +2076,12 @@ void make_detail_row(WeatherUi * ui, lv_obj_t * content, lv_coord_t y,
 
 lv_coord_t make_alert_card(lv_obj_t * content, const WeatherAlert & alert, lv_coord_t y)
 {
+    const auto style=hazard_style(official_impact(alert));
     lv_obj_t * card = make_box(content, 0, y, 940, 130,
-                               lv_color_hex(0x35232A), 9, LV_OPA_90);
+                               lv_color_hex(style.surface), 9, LV_OPA_90);
     const char * title = !alert.short_name.empty() ? alert.short_name.c_str() :
                          !alert.name.empty() ? alert.name.c_str() : "Official alert";
-    make_label(card, title, &lv_font_montserrat_24, c_urgent(), 16, 10, 650, 34);
+    make_label(card, title, &lv_font_montserrat_24, lv_color_hex(style.accent), 16, 10, 650, 34);
     char meta[160];
     std::snprintf(meta, sizeof(meta), "%s%s%s%s%s%s%s",
                   alert_type_text(alert.type),
@@ -2085,8 +2165,17 @@ void render_data_details(WeatherUi * ui)
                   "%s model-based / source %s / fetched %s / %.96s",
                   ui->dashboard.weather.provider.c_str(), weather_source, weather_fetched,
                   ui->dashboard.weather.status.detail.c_str());
-    make_detail_row(ui, content, 0, "Weather", source_state_text(ui->dashboard.weather.status.state),
-                    weather_detail, ui->dashboard.weather.status.state == SourceState::Stale ? c_caution() : c_mint());
+    const auto& w=ui->dashboard.weather;
+    if(w.current_wind_kmh.valid || w.current_gust_kmh.valid) {
+        char speed[16]="--",gust[16]="--";
+        if(w.current_wind_kmh.valid) std::snprintf(speed,sizeof(speed),"%ld",std::lround(w.current_wind_kmh.value));
+        if(w.current_gust_kmh.valid) std::snprintf(gust,sizeof(gust),"%ld",std::lround(w.current_gust_kmh.value));
+        auto used=std::strlen(weather_detail);
+        std::snprintf(weather_detail+used,sizeof(weather_detail)-used," / Wind %s, gusts %s km/h",speed,gust);
+    }
+    const bool delayed=ui->dashboard.weather_update_delayed && ui->dashboard.weather.status.state==SourceState::Fresh;
+    make_detail_row(ui, content, 0, "Weather", delayed?"Update delayed • retrying":source_state_text(ui->dashboard.weather.status.state),
+                    weather_detail, delayed || ui->dashboard.weather.status.state != SourceState::Fresh ? c_caution() : c_mint());
 
     char aq_source[32], aq_fetched[32];
     format_utc_timestamp(ui->dashboard.air_quality.status.source_time_utc,
@@ -2687,7 +2776,8 @@ void update_debug(WeatherUi * ui, const DebugReadings & r) {
     format_utc_timestamp(weather.fetched_time_utc, stamp, sizeof(stamp));
     std::snprintf(detail, sizeof(detail), "Last fetch: %s%s%s", stamp,
                   weather.detail.empty() ? "" : "\n", weather.detail.c_str());
-    card(Forecast, source_state_text(weather.state), detail);
+    card(Forecast, ui->dashboard.weather_update_delayed && weather.state==SourceState::Fresh ?
+         "Update delayed" : source_state_text(weather.state), detail);
 
     format_utc_timestamp(r.last_sync_utc, stamp, sizeof(stamp));
     std::snprintf(detail, sizeof(detail), "Last network sync: %s", stamp);
@@ -2892,8 +2982,22 @@ void minute_tick(WeatherUi * ui, std::int64_t now_utc, const CivilTime & local_n
     ui->dashboard.now_utc = now_utc;
     ui->dashboard.local_now = local_now;
     ui->dashboard.clock_synchronized = local_now.valid;
+    bool banner_changed = false;
+    const bool wind_ended=ui->next_wind_change_utc>0 && now_utc>=ui->next_wind_change_utc;
+    if(ui->have_dashboard && !ui->day_rollover_pending && local_now.valid) {
+        // The clock can advance through the rain before the next weather fetch.
+        auto& old = ui->dashboard.advice;
+        const Advice next = dashboard_advice(ui->dashboard, ui->settings);
+        banner_changed = next.kind != old.kind || next.severity != old.severity ||
+            !(next.headline==old.headline.c_str()) || next.primary_alert_index!=old.primary_alert_index ||
+            next.additional_alert_count != old.additional_alert_count;
+        if(!banner_changed && ui->advice_subtitle &&
+           (!(old.supporting == next.supporting.c_str()) || !(old.second_line == next.second_line.c_str())))
+            set_advice_subtitle(ui->advice_subtitle, next);
+        old = next;
+    }
     if(ui->screen != ScreenKind::Home) return;
-    if(ui->day_rollover_pending) render_home(ui);
+    if(ui->day_rollover_pending || banner_changed || wind_ended) render_home(ui);
     else {
         refresh_clock_labels(ui);
         refresh_now_overlay(ui);

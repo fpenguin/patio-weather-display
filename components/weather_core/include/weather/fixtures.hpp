@@ -33,6 +33,10 @@ enum class FixtureId : std::uint8_t {
     AlertFeedFailure,
     UnsupportedCoverage,
     MinimalRain,
+    SunnyUv,
+    CloudyHoliday,
+    SnowWind,
+    StormDanger,
 };
 
 DashboardModel make_fixture(FixtureId id);

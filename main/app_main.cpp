@@ -6,6 +6,7 @@
 #include "weather/cache_store.hpp"
 #include "weather/clock_service.hpp"
 #include "weather/fixtures.hpp"
+#include "weather/forecast_refresh.hpp"
 #include "weather/gt911_report.hpp"
 #include "weather/holidays.hpp"
 #include "weather/http_client.hpp"
@@ -203,6 +204,7 @@ struct Runtime {
     DashboardModel fixture_dashboard{};
     HolidayCalendar holiday_scratch{};
     bool first_boot{true};
+    bool weather_update_delayed{false};
     bool network_hint_attempted{false};
     bool scan_after_connect{false};
     bool settings_loaded{false};
@@ -706,6 +708,7 @@ void publish_dashboard() {
     dashboard.clock_synchronized = now > 0;
     dashboard.location = s_runtime->settings.location;
     dashboard.weather = s_runtime->sources.weather;
+    dashboard.weather_update_delayed = s_runtime->weather_update_delayed;
     dashboard.air_quality = s_runtime->sources.air_quality;
     if (!s_runtime->settings.aqhi_community.empty()) {
         dashboard.air_quality.community = s_runtime->settings.aqhi_community;
@@ -738,25 +741,7 @@ void publish_dashboard() {
             dashboard.local_now.month, dashboard.local_now.day);
     }
 
-    std::int64_t day_start = now;
-    std::int64_t day_end = now > 0 ? now + 86400 : 0;
-    if (dashboard.local_now.valid) {
-        local_day_bounds_utc(dashboard.location.time_zone.c_str(),
-                             dashboard.local_now.year, dashboard.local_now.month,
-                             dashboard.local_now.day, day_start, day_end);
-    }
-    const AdviceInput advice_input{
-        &dashboard.weather,
-        &dashboard.air_quality,
-        &dashboard.alerts,
-        now,
-        day_end,
-        s_runtime->settings.thresholds,
-        s_runtime->settings.uv_advice_enabled,
-        s_runtime->settings.convenience_advice_enabled,
-        s_runtime->settings.clock_24_hour,
-    };
-    dashboard.advice = choose_advice(advice_input);
+    dashboard.advice = dashboard_advice(dashboard, s_runtime->settings);
 
     MutexGuard guard(s_runtime->ui.mutex);
     if (!guard.locked()) return;
@@ -799,9 +784,10 @@ bool fetch_json(const char* url,
                 std::size_t capacity,
                 std::size_t response_limit,
                 std::size_t& length,
-                Text<128>& error, bool* retryable = nullptr) {
+                Text<128>& error, bool* retryable = nullptr, std::uint32_t* provider_wait = nullptr) {
     length = 0;
     if (retryable) *retryable = false;
+    if (provider_wait) *provider_wait = 0;
     if (!network_manager_has_ip()) {
         if (retryable) *retryable = true;
         error.assign("Network is not connected");
@@ -814,17 +800,28 @@ bool fetch_json(const char* url,
         CONFIG_PATIO_HTTP_USER_AGENT,
     };
     const esp_err_t transport = http_get(url, buffer, capacity, response, options);
-    if (transport != ESP_OK) {
+    // The response body is unnecessary for an HTTP error. A large error page
+    // must not discard a rate limit that we already received in the headers.
+    if (transport != ESP_OK && !(transport == ESP_ERR_INVALID_SIZE &&
+                                 response.truncated && response.status_code >= 400)) {
         if (retryable) *retryable = response.temporary_transport_failure;
         char message[128]{};
-        std::snprintf(message, sizeof(message), "HTTPS failed: %s",
-                      esp_err_to_name(transport));
+        if (response.tls_stage != ESP_OK && response.tls_stage != ESP_FAIL)
+            std::snprintf(message,sizeof(message),"HTTPS: %s / %s",esp_err_to_name(transport),esp_err_to_name(response.tls_stage));
+        else if (response.socket_errno > 0)
+            std::snprintf(message,sizeof(message),"HTTPS: %s / socket %d",esp_err_to_name(transport),response.socket_errno);
+        else std::snprintf(message, sizeof(message), "HTTPS failed: %s", esp_err_to_name(transport));
         error.assign(message);
         return false;
     }
     if (response.status_code < 200 || response.status_code >= 300) {
         if (retryable) *retryable = response.status_code == 408 || response.status_code == 502 ||
                                     response.status_code == 504;
+        if (provider_wait && retryable) {
+            *retryable = transient_forecast_http(response.status_code);
+            if (*retryable) *provider_wait = retry_after_seconds(response.retry_after, current_utc());
+            if (response.status_code == 429 && !*provider_wait) *provider_wait = CONFIG_PATIO_WEATHER_REFRESH_SECONDS;
+        }
         char message[128]{};
         std::snprintf(message, sizeof(message), "Provider returned HTTP %d",
                       response.status_code);
@@ -863,34 +860,41 @@ void publish_source_result(SourceMailbox<T>& mailbox,
 }
 
 void weather_task(void*) {
-    auto* buffer = static_cast<std::uint8_t*>(
-        heap_caps_malloc(providers::kMaxWeatherResponseBytes,
-                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    std::uint8_t* buffer = nullptr;
     SourceRequest active{};
     bool active_valid = false;
+    ForecastRefresh schedule;
+    constexpr unsigned normal = CONFIG_PATIO_WEATHER_REFRESH_SECONDS;
+    auto mono = []() -> std::int64_t { return esp_timer_get_time()/1000; };
     for (;;) {
-        const TickType_t wait = active_valid
-                                    ? pdMS_TO_TICKS(CONFIG_PATIO_WEATHER_REFRESH_SECONDS * 1000U)
-                                    : portMAX_DELAY;
+        // Reconnect/new requests wake this queue. While offline, do no HTTP work.
+        const auto ms = std::min<std::int64_t>(3600000,schedule.wait_ms(mono()));
+        const TickType_t wait = active_valid && network_manager_has_ip() ?
+            (ms ? pdMS_TO_TICKS(ms)+1 : 0) : portMAX_DELAY;
         SourceRequest request{};
-        if (xQueueReceive(s_runtime->weather_requests, &request, wait) == pdTRUE) {
+        const bool requested = xQueueReceive(s_runtime->weather_requests, &request, wait) == pdTRUE;
+        if (requested) {
+            if (!active_valid || request.configuration_generation != active.configuration_generation) schedule.reset();
             active = request;
             active_valid = active.enabled;
         }
-        if (!active_valid) continue;
+        if (!active_valid || !network_manager_has_ip() || !schedule.due(mono(),requested)) continue;
+        if (!buffer) buffer = static_cast<std::uint8_t*>(heap_caps_malloc(providers::kMaxWeatherResponseBytes,
+                                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         if (!buffer) {
+            schedule.finish(mono(),normal,true);
             publish_source_result(s_runtime->weather_mailbox,
                                   static_cast<const WeatherSnapshot*>(nullptr), false,
                                   active.configuration_generation,
                                   "No PSRAM for weather response", AppEventKind::WeatherResult);
-            vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
         std::int64_t now = 0;
-        if (!network_manager_has_ip() || !wait_for_synchronized_clock(now)) continue;
+        if (!wait_for_synchronized_clock(now)) { schedule.finish(mono(),normal,true); continue; }
         auto& url = s_runtime->weather_url;
         if (!providers::build_open_meteo_forecast_url(
                 url, sizeof(url), active.location.latitude, active.location.longitude)) {
+            schedule.finish(mono(),normal);
             publish_source_result(s_runtime->weather_mailbox,
                                   static_cast<const WeatherSnapshot*>(nullptr), false,
                                   active.configuration_generation, "Invalid weather URL",
@@ -899,14 +903,23 @@ void weather_task(void*) {
         }
         std::size_t length = 0;
         Text<128> error{};
+        bool temporary = false;
+        std::uint32_t provider_wait = 0;
         if (!fetch_json(url, buffer, providers::kMaxWeatherResponseBytes,
-                        providers::kMaxWeatherResponseBytes, length, error)) {
+                        providers::kMaxWeatherResponseBytes, length, error, &temporary, &provider_wait)) {
+            const auto failed_at = mono();
+            schedule.finish(failed_at, normal, temporary, provider_wait);
+            char detail[128];
+            std::snprintf(detail,sizeof(detail),"%.64s; retry in %lld s",error.c_str(),
+                          static_cast<long long>(schedule.wait_ms(failed_at)/1000));
+            ESP_LOGW(kTag,"Weather update delayed: %s",detail);
             publish_source_result(s_runtime->weather_mailbox,
                                   static_cast<const WeatherSnapshot*>(nullptr), false,
-                                  active.configuration_generation, error.c_str(),
+                                  active.configuration_generation, detail,
                                   AppEventKind::WeatherResult);
             continue;
         }
+        schedule.finish(mono(),normal);
         reset_in_place(s_runtime->weather_scratch);
         const providers::ParseResult parsed = providers::parse_open_meteo_weather(
             reinterpret_cast<const char*>(buffer), length, now,
@@ -1414,7 +1427,8 @@ void configure_source_workers(bool retry_only = false) {
     request.configuration_generation = s_runtime->configuration_generation;
     const bool live_configured = !kFixtureMode && s_runtime->settings.configured;
     request.enabled = live_configured;
-    if (!retry_only || (request.enabled && needs_source_retry(s_runtime->sources.weather.status.state)))
+    if (!retry_only || (request.enabled && (s_runtime->weather_update_delayed ||
+                                           needs_source_retry(s_runtime->sources.weather.status.state))))
         xQueueOverwrite(s_runtime->weather_requests, &request);
     request.enabled = live_configured && request.location.country_code == "CA";
     if (!retry_only || (request.enabled && needs_source_retry(s_runtime->sources.alerts.status.state)))
@@ -1426,8 +1440,9 @@ void configure_source_workers(bool retry_only = false) {
 
 void mark_weather_failure(const char* detail) {
     auto& weather = s_runtime->sources.weather;
-    weather.status.state = have_weather(weather) ? SourceState::Stale
-                                                  : SourceState::Unavailable;
+    s_runtime->weather_update_delayed = true;
+    weather.status.state = weather_after_failure(weather.status,have_weather(weather),current_utc(),
+                                                CONFIG_PATIO_WEATHER_STALE_SECONDS);
     weather.status.detail.assign(detail);
 }
 
@@ -1454,7 +1469,10 @@ bool consume_source_results() {
         if (guard.locked() && mailbox.generation != s_runtime->weather_seen) {
             s_runtime->weather_seen = mailbox.generation;
             if (mailbox.configuration_generation == s_runtime->configuration_generation) {
-                if (mailbox.success) s_runtime->sources.weather = mailbox.value;
+                if (mailbox.success) {
+                    s_runtime->sources.weather = mailbox.value;
+                    s_runtime->weather_update_delayed = false;
+                }
                 else mark_weather_failure(mailbox.error.c_str());
                 changed = true;
             }
@@ -1522,6 +1540,7 @@ void save_confirmed_location(const Location& location) {
     s_runtime->first_boot = false;
     ++s_runtime->configuration_generation;
     reset_in_place(s_runtime->sources);
+    s_runtime->weather_update_delayed = false;
     s_runtime->sources.location = next.location;
     const bool canada = next.location.country_code == "CA";
     set_unavailable_sources(s_runtime->sources, canada, canada);

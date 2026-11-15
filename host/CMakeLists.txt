@@ -14,6 +14,7 @@ set(WEATHER_CORE_DIR "${CMAKE_CURRENT_LIST_DIR}/../components/weather_core")
 add_library(weather_core_host STATIC
     "${WEATHER_CORE_DIR}/src/rainfall.cpp"
     "${WEATHER_CORE_DIR}/src/timeline.cpp"
+    "${WEATHER_CORE_DIR}/src/forecast_refresh.cpp"
     "${WEATHER_CORE_DIR}/src/advice.cpp"
     "${WEATHER_CORE_DIR}/src/holidays.cpp"
     "${WEATHER_CORE_DIR}/src/validation.cpp"

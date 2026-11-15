@@ -29,24 +29,20 @@ RainAmount remaining_liquid_rain(const WeatherSnapshot& weather,
     RainAmount result{};
     for (std::size_t i = 0; i < weather.hour_count && i < weather.hours.size(); ++i) {
         const auto& hour = weather.hours[i];
-        if (hour.interval_end_utc <= now_utc ||
-            hour.interval_start_utc >= local_day_end_utc) {
-            continue;
-        }
+        const auto start = std::max(hour.interval_start_utc, now_utc);
+        const auto end = std::min(hour.interval_end_utc, local_day_end_utc);
+        if (end <= start) continue;
         const RainAmount sample = liquid_rain_for_hour(hour);
         if (!sample.valid) {
             continue;
         }
         result.valid = true;
         float amount = sample.millimetres;
-        if (hour.interval_start_utc < now_utc && now_utc < hour.interval_end_utc) {
-            const auto duration = hour.interval_end_utc - hour.interval_start_utc;
-            if (duration > 0) {
-                const float remaining = static_cast<float>(hour.interval_end_utc - now_utc) /
-                                        static_cast<float>(duration);
-                amount *= std::clamp(remaining, 0.0F, 1.0F);
-                result.estimated_partial_hour = true;
-            }
+        if (amount > 0 && (start != hour.interval_start_utc || end != hour.interval_end_utc)) {
+            // A local midnight may also fall inside a provider hour.
+            amount *= static_cast<float>(end - start) /
+                      static_cast<float>(hour.interval_end_utc - hour.interval_start_utc);
+            result.estimated_partial_hour = true;
         }
         result.millimetres += amount;
     }

@@ -30,6 +30,9 @@ enum class IconKind : std::uint8_t {
     chevron,
     check,
     alert,
+    jacket,
+    boot,
+    sun_hat,
 };
 
 // Creates a square, transparent LVGL object. The returned object is owned by

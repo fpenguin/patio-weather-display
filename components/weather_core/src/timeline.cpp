@@ -1,4 +1,5 @@
 #include "weather/timeline.hpp"
+#include "weather/severity.hpp"
 #include "weather/time_zone.hpp"
 #include <cstdio>
 
@@ -8,15 +9,16 @@ Exposure wind_exposure(const HourlyWeather& h) {
     if (!h.wind_kmh.valid && !h.gust_kmh.valid) return Exposure::Unknown;
     const float speed = h.wind_kmh.valid ? h.wind_kmh.value : 0;
     const float gust = h.gust_kmh.valid ? h.gust_kmh.value : 0;
-    if (speed >= 30 || gust >= 40) return Exposure::Strong;
-    if (speed >= 20 || gust >= 30) return Exposure::Breezy;
+    const auto severity = wind_impact(speed, gust);
+    if (severity >= Severity::Warning) return Exposure::Strong;
+    if (severity == Severity::Caution) return Exposure::Breezy;
     return Exposure::Light;
 }
 
 Exposure outdoor_exposure(const HourlyWeather& h) {
     if (h.weather_code.valid) {
         if (h.weather_code.value == 96 || h.weather_code.value == 99) return Exposure::Hail;
-        if (h.weather_code.value == 95) return Exposure::Storm;
+        if (h.weather_code.value == 95 || h.weather_code.value == 97) return Exposure::Storm;
     }
     return wind_exposure(h);
 }
@@ -46,21 +48,36 @@ DaySummary day_summary(const WeatherSnapshot& weather, const CivilTime& today, c
     return result;
 }
 
-void format_clock_minute(int minute, bool clock24, char* out, std::size_t n, bool show_minutes) {
+namespace {
+void write_minute(int minute, bool clock24, char* out, std::size_t n, bool show_minutes,
+                  const char* suffix) {
     const int h = (minute / 60) % 24, m = minute % 60;
     if (clock24) std::snprintf(out, n, "%02d:%02d", minute == 1440 ? 24 : h, m);
     else if (!show_minutes && minute == 1440) std::snprintf(out, n, "midnight");
-    else if (show_minutes || m) std::snprintf(out, n, "%d:%02d %s", h % 12 ? h % 12 : 12, m, h >= 12 ? "PM" : "AM");
-    else std::snprintf(out, n, "%d %s", h % 12 ? h % 12 : 12, h >= 12 ? "PM" : "AM");
+    else if (show_minutes || m) std::snprintf(out, n, "%d:%02d%s", h % 12 ? h % 12 : 12, m, suffix);
+    else std::snprintf(out, n, "%d%s", h % 12 ? h % 12 : 12, suffix);
 }
 
-void format_time_window(int from, int until, bool clock24, char* out, std::size_t n) {
+const char* period_suffix(int minute, bool compact) {
+    const bool pm = (minute / 60) % 24 >= 12;
+    return compact ? (pm ? "pm" : "am") : (pm ? " PM" : " AM");
+}
+} // namespace
+
+void format_clock_minute(int minute, bool clock24, char* out, std::size_t n, bool show_minutes) {
+    write_minute(minute, clock24, out, n, show_minutes, period_suffix(minute, false));
+}
+
+void format_time_window(int from, int until, bool clock24, char* out, std::size_t n, WindowLabel style) {
+    const bool compact = style != WindowLabel::Standard;
     char a[20], b[20];
-    format_clock_minute(from, clock24, a, sizeof(a));
-    format_clock_minute(until, clock24, b, sizeof(b));
-    if (!clock24 && until < 1440 && from / 720 == until / 720) {
-        for (char* p = a; *p; ++p) if (*p == ' ') { *p = 0; break; }
+    write_minute(until, clock24, b, sizeof(b), false, period_suffix(until, compact));
+    if (style == WindowLabel::CompactUntil) {
+        std::snprintf(out, n, "until %s", b);
+        return;
     }
-    std::snprintf(out, n, "%s–%s", a, b);
+    const bool same_period = until < 1440 && from / 720 == until / 720;
+    write_minute(from, clock24, a, sizeof(a), false, same_period ? "" : period_suffix(from, compact));
+    std::snprintf(out, n, "%s%s%s", a, compact ? "-" : "–", b);
 }
 } // namespace patio

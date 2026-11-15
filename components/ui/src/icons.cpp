@@ -338,6 +338,30 @@ void draw_alert(IconPainter & p)
     p.filled_circle(500, 760, 28);
 }
 
+void draw_jacket(IconPainter& p) {
+    p.line(390,175,610,175); p.line(390,175,290,235); p.line(290,235,130,690);
+    p.line(130,690,245,730); p.line(245,730,330,495); p.line(330,495,310,845);
+    p.line(310,845,690,845); p.line(690,845,670,495); p.line(670,495,755,730);
+    p.line(755,730,870,690); p.line(870,690,710,235); p.line(710,235,610,175);
+    p.line(390,175,500,320); p.line(610,175,500,320); p.line(500,320,500,840);
+    p.line(390,630,365,720); p.line(610,630,635,720);
+}
+
+void draw_boot(IconPainter& p) {
+    p.line(215,190,585,190); p.line(585,190,585,465); p.line(585,465,675,590);
+    p.line(675,590,820,635); p.line(820,635,850,725); p.line(850,725,215,725);
+    p.line(215,725,215,190); p.line(215,290,585,290); p.line(215,820,850,820);
+    p.line(215,725,215,820); p.line(850,725,850,820);
+    p.line(490,410,585,390); p.line(505,485,600,465);
+}
+
+void draw_sun_hat(IconPainter& p) {
+    draw_small_sun(p,735,255,82);
+    p.arc(500,635,245,180,360); p.line(255,635,745,635);
+    p.line(255,635,120,715); p.line(120,715,195,755); p.line(195,755,805,755);
+    p.line(805,755,880,715); p.line(880,715,745,635);
+}
+
 void draw_icon(lv_event_t * event)
 {
     lv_obj_t * obj = lv_event_get_target(event);
@@ -350,6 +374,9 @@ void draw_icon(lv_event_t * event)
     const IconKind kind = static_cast<IconKind>(reinterpret_cast<std::uintptr_t>(lv_event_get_user_data(event)));
 
     switch(kind) {
+        case IconKind::jacket: draw_jacket(painter); break;
+        case IconKind::boot: draw_boot(painter); break;
+        case IconKind::sun_hat: draw_sun_hat(painter); break;
         case IconKind::settings_sliders:
             draw_settings_sliders(painter);
             break;

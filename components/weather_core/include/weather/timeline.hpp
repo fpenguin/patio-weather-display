@@ -14,6 +14,8 @@ struct DaySummary {
 };
 DaySummary day_summary(const WeatherSnapshot& weather, const CivilTime& today, const char* zone);
 void format_clock_minute(int minute, bool clock24, char* out, std::size_t n, bool show_minutes = false);
-void format_time_window(int from, int until, bool clock24, char* out, std::size_t n);
+enum class WindowLabel { Standard, Compact, CompactUntil };
+void format_time_window(int from, int until, bool clock24, char* out, std::size_t n,
+                        WindowLabel style = WindowLabel::Standard);
 
 } // namespace patio

@@ -17,6 +17,7 @@ struct AdviceInput {
 };
 
 Advice choose_advice(const AdviceInput& input);
+Advice dashboard_advice(const DashboardModel& dashboard, const Settings& settings);
 bool alert_active_at(const WeatherAlert& alert, std::int64_t now);
 int alert_priority(const WeatherAlert& alert);
 

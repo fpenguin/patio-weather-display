@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cstring>
+#include <strings.h>
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "mbedtls/x509.h"
 #include "sdkconfig.h"
 
 #if !CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
@@ -23,11 +25,17 @@ struct ReceiveContext {
     std::size_t limit;
     std::size_t written;
     bool truncated;
+    HttpResponse& response;
 };
 
 esp_err_t event_handler(esp_http_client_event_t* event) {
     auto* context = static_cast<ReceiveContext*>(event->user_data);
     if (!context) return ESP_ERR_INVALID_ARG;
+    if (event->event_id == HTTP_EVENT_ON_HEADER && event->header_key && event->header_value &&
+        strcasecmp(event->header_key,"Retry-After")==0 &&
+        std::strlen(event->header_value)<sizeof(context->response.retry_after)) {
+        std::strcpy(context->response.retry_after,event->header_value);
+    }
     if (event->event_id != HTTP_EVENT_ON_DATA || !event->data || event->data_len <= 0) {
         return ESP_OK;
     }
@@ -69,6 +77,7 @@ esp_err_t http_get(const char* url,
         std::min(response_capacity, options.response_limit),
         0,
         false,
+        response,
     };
     esp_http_client_config_t config{};
     config.url = url;
@@ -106,14 +115,16 @@ esp_err_t http_get(const char* url,
     response.transport_error = performed;
     if (performed != ESP_OK) {
         int tls_code = 0, cert_flags = 0;
-        esp_http_client_get_and_clear_last_tls_error(client, &tls_code, &cert_flags);
-        response.temporary_transport_failure = cert_flags == 0 && (
+        response.socket_errno = esp_http_client_get_errno(client);
+        response.tls_stage = esp_http_client_get_and_clear_last_tls_error(client, &tls_code, &cert_flags);
+        response.temporary_transport_failure = cert_flags == 0 && tls_code != MBEDTLS_ERR_X509_CERT_VERIFY_FAILED && (
             performed == ESP_ERR_HTTP_CONNECT || performed == ESP_ERR_HTTP_CONNECTION_CLOSED ||
             performed == ESP_ERR_HTTP_FETCH_HEADER || performed == ESP_ERR_HTTP_READ_TIMEOUT ||
             performed == ESP_ERR_HTTP_EAGAIN || performed == ESP_ERR_HTTP_INCOMPLETE_DATA ||
             performed == ESP_ERR_TIMEOUT);
-        ESP_LOGW(TAG, "HTTPS failure: %s (TLS %d, cert flags %x)", esp_err_to_name(performed), tls_code,
-                 static_cast<unsigned>(cert_flags));
+        ESP_LOGW(TAG, "HTTPS failure: %s (stage %s, TLS %d, cert flags %x, errno %d)",
+                 esp_err_to_name(performed), esp_err_to_name(response.tls_stage), tls_code,
+                 static_cast<unsigned>(cert_flags), response.socket_errno);
     }
     esp_http_client_cleanup(client);
 

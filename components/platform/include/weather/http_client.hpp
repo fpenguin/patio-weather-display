@@ -24,6 +24,9 @@ struct HttpResponse {
     bool truncated{false};
     bool chunked{false};
     esp_err_t transport_error{ESP_OK};
+    esp_err_t tls_stage{ESP_OK};
+    int socket_errno{0};
+    char retry_after[64]{};
 };
 
 /**

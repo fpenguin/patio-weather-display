@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "lvgl.h"
+#include "weather/advice.hpp"
 #include "weather/fixtures.hpp"
 #include "weather/holidays.hpp"
 #include "weather/weather_ui.hpp"
@@ -72,6 +73,16 @@ void tap_key(lv_obj_t* keyboard, const char* key) {
     }
     assert(false && "key missing");
 }
+lv_obj_t* one_line(const char* text) {
+    auto* obj = label(lv_scr_act(), text);
+    assert(obj);
+    lv_obj_update_layout(obj);
+    const auto* font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
+    assert(lv_obj_get_height(obj) == lv_font_get_line_height(font));
+    assert(lv_txt_get_width(text, std::strlen(text), font, 0, LV_TEXT_FLAG_NONE) <=
+           lv_obj_get_content_width(obj));
+    return obj;
+}
 void collect_rain_labels(lv_obj_t* root, std::vector<lv_area_t>& areas) {
     if(lv_obj_check_type(root, &lv_label_class)) {
         const auto* text=lv_label_get_text(root);
@@ -89,8 +100,9 @@ void check_rain_labels(std::size_t expected) {
     std::vector<lv_area_t> areas;
     collect_rain_labels(lv_scr_act(), areas);
     assert(areas.size() == expected);
+    const auto rail=label(lv_scr_act(),"Noon")->coords.y1-12;
     for(std::size_t i = 0; i < areas.size(); ++i) {
-        assert(areas[i].x1 >= 20 && areas[i].x2 < 1004 && areas[i].y1 >= 170 && areas[i].y2 < 287);
+        assert(areas[i].x1 >= 20 && areas[i].x2 < 1004 && areas[i].y1 >= 170 && areas[i].y2 < rail);
         for(std::size_t j = 0; j < i; ++j) {
             assert(areas[i].x2 < areas[j].x1 || areas[j].x2 < areas[i].x1 ||
                    areas[i].y2 < areas[j].y1 || areas[j].y2 < areas[i].y1);
@@ -133,13 +145,7 @@ int main() {
     coastal.advice.supporting.assign(alert.text.c_str());
     coastal.advice.additional_alert_count = 1;
     patio::ui::update_dashboard(ui, coastal);
-    auto* summary = label(lv_scr_act(), "Tap to read the full alert.");
-    assert(summary);
-    lv_obj_update_layout(summary);
-    auto* font = lv_obj_get_style_text_font(summary, LV_PART_MAIN);
-    assert(lv_obj_get_height(summary) == lv_font_get_line_height(font));
-    assert(lv_txt_get_width(lv_label_get_text(summary), std::strlen(lv_label_get_text(summary)),
-                            font, 0, LV_TEXT_FLAG_NONE) <= lv_obj_get_content_width(summary));
+    auto* summary = one_line("Tap to read the full alert.");
     auto* badge = label(lv_scr_act(), "+1 alert");
     assert(badge && summary->coords.x2 < lv_obj_get_parent(badge)->coords.x1);
     for(auto point : {lv_point_t{400,540}, lv_point_t{925,521}, lv_point_t{95,521}}) {
@@ -178,8 +184,11 @@ int main() {
     assert(label(lv_scr_act(), "Retry data"));
     coastal.weather.status.state = patio::SourceState::Fresh;
     coastal.air_quality.status.state = patio::SourceState::Unsupported;
+    coastal.weather_update_delayed = true;
     patio::ui::update_dashboard(ui, coastal);
     assert(!label(lv_scr_act(), "Retry data"));
+    assert(label(lv_scr_act(), "UPDATE DELAYED") && !label(lv_scr_act(), "STALE FORECAST"));
+    coastal.weather_update_delayed = false;
     patio::ui::set_connectivity_state(ui, ConnectivityState::Backoff, "Offline");
     auto * scan_wifi = label(lv_scr_act(), "Scan Wi-Fi");
     assert(scan_wifi);
@@ -248,10 +257,10 @@ int main() {
     korean.air_quality.scale.assign("US AQI");
     korean.air_quality.display_index = patio::Optional<int>::some(146);
     patio::ui::update_dashboard(ui, korean);
-    assert(label(lv_scr_act(), "US AQI 146"));
+    assert(label(lv_scr_act(), "US AQI 146 • Sensitive groups"));
     korean.air_quality.status.state = patio::SourceState::Stale;
     patio::ui::update_dashboard(ui, korean);
-    assert(label(lv_scr_act(), "US AQI 146 • Stale"));
+    assert(label(lv_scr_act(), "US AQI 146 • Sensitive groups • Stale"));
     model.weather.current_temperature_c = patio::Optional<float>::some(-0.4F);
     model.weather.current_apparent_c = patio::Optional<float>::some(-0.4F);
     patio::ui::update_dashboard(ui, model);
@@ -280,22 +289,23 @@ int main() {
     patio::ui::minute_tick(ui, model.now_utc, noon);
     lv_obj_update_layout(lv_scr_act());
     auto* noon_tick = label(lv_scr_act(), "Noon");
-    assert(noon_tick && noon_tick->coords.y1 == 299);
+    assert(noon_tick && noon_tick->coords.y1 == 350);
+    const auto tick_y=noon_tick->coords.y1;
     auto marker_at=[](int x,int y) {
         lv_refr_now(nullptr);
         const auto c=lv_color_to32(frame[y*1024+x]);
         lv_color32_t out{}; out.full=c;
         return out.ch.green>180 && out.ch.blue>180 && out.ch.red<60;
     };
-    assert(marker_at(369,272));
+    assert(marker_at(369,tick_y-27));
     noon.minute = 59;
     patio::ui::minute_tick(ui, model.now_utc + 59*60, noon);
     lv_obj_update_layout(lv_scr_act());
     noon.hour = 15; noon.minute = 0;
     patio::ui::minute_tick(ui, model.now_utc + 3*3600, noon);
     lv_obj_update_layout(lv_scr_act());
-    assert(label(lv_scr_act(), "Noon")==noon_tick && noon_tick->coords.y1 == 299);
-    assert(label(lv_scr_act(), "3 PM")->coords.y1 == 299 && marker_at(517,272) && !marker_at(369,272));
+    assert(label(lv_scr_act(), "Noon")==noon_tick && noon_tick->coords.y1 == tick_y);
+    assert(label(lv_scr_act(), "3 PM")->coords.y1 == tick_y && marker_at(517,tick_y-27) && !marker_at(369,tick_y-27));
     assert(!label(lv_scr_act(), "NOW") && !label(lv_scr_act(), "DEVELOPMENT FIXTURE"));
     auto tomorrow = model.local_now;
     ++tomorrow.day; tomorrow.hour = 0; tomorrow.minute = 0;
@@ -304,25 +314,102 @@ int main() {
     assert(label(lv_scr_act(), "Updating today's weather"));
     assert(!label(lv_scr_act(),"Sunrise 7:11 AM") && !label(lv_scr_act(),"High 14°"));
     auto design=patio::make_fixture(patio::FixtureId::MinimalRain);
+    {
+        auto with_badge = design;
+        patio::AdviceInput in{&with_badge.weather, nullptr, nullptr, design.now_utc,
+                              with_badge.weather.hours[17].interval_end_utc};
+        in.clock_24_hour = true;
+        with_badge.advice = patio::choose_advice(in);
+        with_badge.advice.additional_alert_count = 1;
+        patio::ui::update_dashboard(ui, with_badge);
+        auto* rain_line = one_line("6.1mm of rain expected 11:00-17:00. Strong wind 14:00-17:00.");
+        auto* extra_alert = label(lv_scr_act(), "+1 alert");
+        assert(extra_alert && rain_line->coords.x2 < lv_obj_get_parent(extra_alert)->coords.x1);
+    }
     patio::ui::update_dashboard(ui,design);
+    auto* rain_subtitle = one_line("6.1mm of rain expected 11am-5pm. Strong wind 2-5pm.");
     check_rain_labels(7);
     assert(label(lv_scr_act(),"High 9°") && label(lv_scr_act(),"Low 4°") &&
            label(lv_scr_act(),"AQHI 3 • Low") && label(lv_scr_act(),"Sunrise 7:11 AM") &&
            label(lv_scr_act(),"Sunset 5:23 PM") && label(lv_scr_act(),"STRONG"));
     assert(!label(lv_scr_act(),"Morning") && !label(lv_scr_act(),"Forecast at a glance"));
+    auto* windy=lv_obj_get_parent(label(lv_scr_act(),"STRONG"));
+    assert(windy->coords.x1==468 && windy->coords.x2==614);
+    assert(lv_color_to32(lv_obj_get_style_bg_color(windy,0)) == lv_color_to32(lv_color_hex(0xFFA354)));
+    assert(label(lv_scr_act(),"CAUTION") && !label(lv_scr_act(),"LIGHT"));
     auto time=design.local_now; time.hour=11; time.minute=30;
     auto* drizzle=label(lv_scr_act(),"0.2mm"); const int normal_y=drizzle->coords.y1;
     patio::ui::minute_tick(ui,design.now_utc+48*60,time); lv_obj_update_layout(lv_scr_act());
+    assert(one_line("About 6mm of rain expected until 5pm. Strong wind 2-5pm.") == rain_subtitle);
     assert(drizzle->coords.y1<normal_y && drizzle->coords.y2<287-24);
     time.hour=12; time.minute=45;
     patio::ui::minute_tick(ui,design.now_utc+123*60,time); lv_obj_update_layout(lv_scr_act());
     assert(drizzle->coords.y1==normal_y);
+    time.hour=15; time.minute=30;
+    patio::ui::minute_tick(ui,design.weather.hours[9].interval_start_utc+1800,time);
+    assert(one_line("About 1.1mm of rain expected until 5pm. Strong wind until 5pm.") == rain_subtitle);
+    time.hour=17; time.minute=0;
+    patio::ui::minute_tick(ui,design.weather.hours[11].interval_start_utc,time);
+    assert(!label(lv_scr_act(),"Take an umbrella"));
+    assert(!label(lv_scr_act(),"WIND") && !label(lv_scr_act(),"STRONG"));
     for(auto fixture : {patio::FixtureId::Snow,patio::FixtureId::Thunderstorm,patio::FixtureId::HighUv}) {
         auto d=patio::make_fixture(fixture);
         patio::ui::update_dashboard(ui,d);
         assert(label(lv_scr_act(),fixture==patio::FixtureId::Snow ? "4.0cm" :
-                                  fixture==patio::FixtureId::Thunderstorm ? "Storm" : "UV"));
+                                  fixture==patio::FixtureId::Thunderstorm ? "Storm" : "UV 8"));
     }
+    auto sunny=patio::make_fixture(patio::FixtureId::SunnyUv);
+    patio::ui::update_dashboard(ui,sunny);
+    lv_obj_update_layout(lv_scr_act());
+    assert(!label(lv_scr_act(),"WIND") && !label(lv_scr_act(),"Today is"));
+    assert(label(lv_scr_act(),"WARNING") && label(lv_scr_act(),"Wear a hat and sunscreen"));
+    auto* uv=one_line("HIGH UV • 7");
+    auto* band=lv_obj_get_parent(uv);
+    assert(band->coords.x1==370 && band->coords.x2==515);
+    assert(lv_color_to32(lv_obj_get_style_bg_color(band,0)) == lv_color_to32(lv_color_hex(0xFFA354)));
+    auto gusts=sunny;
+    gusts.weather.hours[7].gust_kmh.value=41; gusts.weather.hours[8].gust_kmh.value=30;
+    patio::ui::update_dashboard(ui,gusts);
+    lv_obj_update_layout(lv_scr_act());
+    for(const char* word : {"Strong","Breezy"}) {
+        auto* name=label(lv_scr_act(),word);
+        assert(name);
+        const auto width=lv_txt_get_width(word,std::strlen(word),lv_obj_get_style_text_font(name,0),
+                                          lv_obj_get_style_text_letter_space(name,0),LV_TEXT_FLAG_NONE);
+        assert(width<=lv_obj_get_content_width(name));
+    }
+    auto holiday=patio::make_fixture(patio::FixtureId::CloudyHoliday);
+    patio::ui::update_dashboard(ui,holiday);
+    lv_obj_update_layout(lv_scr_act());
+    assert(label(lv_scr_act(),"Today is") && label(lv_scr_act(),"Bring a light jacket"));
+    auto* name=one_line("National Day for Truth and Reconciliation");
+    auto* region=one_line("in BC, Canada");
+    assert(name->coords.x2<region->coords.x1 && name->coords.y1>145 && region->coords.x2<1024);
+    assert(!label(lv_scr_act(),"WIND") && !label(lv_scr_act(),"CAUTION") && !label(lv_scr_act(),"LIGHT"));
+    auto booting=holiday;
+    booting.local_now={}; booting.clock_synchronized=false; booting.featured_holiday={};
+    booting.weather.status.state=patio::SourceState::Stale;
+    patio::ui::update_dashboard(ui,booting);
+    lv_obj_update_layout(lv_scr_act());
+    assert(label(lv_scr_act(),"SYNCING TIME")->coords.x2 < lv_obj_get_parent(label(lv_scr_act(),"STALE FORECAST"))->coords.x1);
+    assert(label(lv_scr_act(),"Time syncing")->coords.y1 > label(lv_scr_act(),"6 AM")->coords.y2);
+    // The holiday still owns the full row during a red warning. Light wind
+    // alone is not permission to remove a forecast thunderstorm from the rail.
+    auto storm_holiday=holiday;
+    for(int i=7;i<9;++i) storm_holiday.weather.hours[i].weather_code.value=95;
+    storm_holiday.advice=patio::dashboard_advice(storm_holiday,settings);
+    patio::ui::update_dashboard(ui,storm_holiday);
+    lv_obj_update_layout(lv_scr_act());
+    assert(one_line("National Day for Truth and Reconciliation")->coords.y2 < label(lv_scr_act(),"Noon")->coords.y1);
+    auto* storm_word=label(lv_scr_act(),"STORM");
+    assert(storm_word && label(lv_scr_act(),"RISK") && label(lv_scr_act(),"DANGER") && !label(lv_scr_act(),"LIGHT"));
+    assert(lv_color_to32(lv_obj_get_style_bg_color(lv_obj_get_parent(storm_word),0))==lv_color_to32(lv_color_hex(0xFF6875)));
+    for(auto& h:holiday.weather.hours) { h.wind_kmh={}; h.gust_kmh={}; }
+    patio::ui::update_dashboard(ui,holiday);
+    assert(label(lv_scr_act(),"Wind unavailable"));
+    holiday.weather.hours[9].wind_kmh=patio::Optional<float>::some(5);
+    patio::ui::update_dashboard(ui,holiday);
+    assert(label(lv_scr_act(),"Wind data incomplete"));
 
     std::array<patio::ui::WifiNetwork, patio::ui::kMaxWifiNetworks> networks;
     for(std::size_t i = 0; i < networks.size(); ++i) {

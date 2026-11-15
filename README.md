@@ -4,7 +4,7 @@ Dedicated native ESP-IDF/LVGL firmware for the **Waveshare ESP32-S3-Touch-LCD-7B
 
 The firmware is not a screenshot or browser shell. The dashboard, chart, icons, settings, keyboards, candidate lists, and warning banners are LVGL 8 objects drawn by the ESP32-S3.
 
-[Download firmware v1.0.29](https://github.com/fpenguin/patio-weather-display/releases/tag/v1.0.29) · [Release notes](RELEASE_NOTES.md) · [International QA](docs/international-qa.md)
+[Download firmware v1.0.30](https://github.com/fpenguin/patio-weather-display/releases/tag/v1.0.30) · [Release notes](RELEASE_NOTES.md) · [International QA](docs/international-qa.md)
 
 ![Rainy-day dashboard with hourly precipitation and a clothing recommendation](screenshots/dashboard/rain.png)
 
@@ -13,12 +13,12 @@ The repository is public for inspection and release distribution. No license has
 ## What is implemented
 
 - Local date and clock, outside temperature, feels-like, today’s high/low, and regional air quality. One bottom banner recommends what to wear or shows a higher-priority warning.
-- One 6 AM–midnight timeline: hourly ticks, labels every three hours, local daylight in gold, and a bright cyan marker at the current minute. Muted rain (mm) and snow (cm) bars rise from this rail; a dry high-UV window uses the same lane. The strip below shows light, breezy, or strong wind; storm or hail risk takes precedence for the affected hours.
+- One 6 AM–midnight timeline: hourly ticks, labels every three hours, daylight in gold, and a cyan current-time marker. Rain (mm) and snow (cm) rise from the rail; dry hours with high UV use the same lane. The strip below appears for breezy, strong or severe wind, thunderstorm or hail risk. When the rest of the day is light, the chart uses that extra space.
 - Open-Meteo current, hourly and daily weather. Each liquid bar is `rain + showers` for `[T-3600,T)`. Snow depth added during that hour is plotted separately, never converted to rain or multiplied by probability. Bars use stable scale steps (3/6/12/24/48/96 in the displayed unit); capped bars retain their amount label. Sunrise, sunset and the full-day high/low come from the daily forecast for the configured location and local date.
 - ECCC Canadian AQHI with explicit nearest-community selection and source observation time. AQHI 10+ is preserved. High AQHI alone is described as poor air quality, not wildfire smoke.
 - ECCC official alerts filtered with a geographic point intersection. Alert type, timing, IDs, impact, and feed-failure/cached-alert state are retained independently of weather and AQHI.
 - Deterministic advice for dry, rain, heavy rain, strong wind, ice, snow, thunderstorm risk, heat, cold, poor air quality, high UV, unavailable weather, and applicable official alerts.
-- Offline holiday calendars for Canada (federal, all provinces and territories), the US (federal, states, DC and selected cities), and South Korea. See [holiday coverage and sources](docs/holidays.md).
+- Offline holiday calendars for Canada (federal, all provinces and territories), the US (federal, states, DC and selected cities), and South Korea. An applicable holiday has its own full-width line underneath the clock and conditions, even when a weather warning is active. See [holiday coverage and sources](docs/holidays.md).
 - First-boot Wi-Fi scan/select/password flow; city, postal/ZIP, and signed coordinate location modes; ambiguous-result selection; named-zone preview; and on-screen alphabetic/numeric keyboards.
 - UTC/SNTP clock plus generated IANA zone transitions. It handles fractional offsets, 23/25-hour days, repeated/missing local hours, and BC's 2026 permanent UTC-07 rule for `America/Vancouver`.
 - Two-slot, versioned, CRC-protected NVS settings; bounded CRC-protected SPIFFS source cache; independent source state/freshness; HTTPS certificate-bundle and hostname verification; bounded HTTP bodies and timeouts.
@@ -223,7 +223,9 @@ No paid backend or API key is required for the implemented BC path.
 
 When a supported feed is stale or unavailable, a red warning triangle appears in the bottom banner. Tap **Retry data** to request an update immediately. If Wi-Fi is offline, the same button says **Scan Wi-Fi** and opens the network list. Alert text and the alert-count badge still open the bulletin.
 
-Open-Meteo weather defaults to a 15-minute refresh and becomes materially stale after 3 hours. The request is bounded to the fields and horizon needed by this display. Model-based current conditions are described as such in Data & about; the board is not measuring outdoor temperature.
+Open-Meteo weather normally refreshes every 15 minutes. After a temporary connection or server failure it tries again after **30 seconds, 1 minute, 2 minutes, then every 5 minutes**. Reconnecting Wi-Fi or requesting a retry can bring the next attempt forward. If the provider specifies a longer wait (`Retry-After`), that minimum also applies to manual retries; a 429 without one waits the normal polling interval. A successful fetch restores the regular cadence. Permanent errors, such as invalid requests, do not start rapid retries. Air-quality and official-alert polling use their own schedules.
+
+A failed fetch with recent cached weather shows **Update delayed**. The forecast becomes **Stale forecast** once its source time is over three hours old by default; without a cached forecast, weather shows as unavailable. **Settings → Data & about** displays the last error. Current conditions are model estimates rather than measurements by the board.
 
 Nominatim is called only after an explicit user action, never for background
 autocomplete. The last successful exact query is cached in bounded RAM for the
@@ -263,7 +265,7 @@ value can remain visible as stale.
 
 Default refresh and staleness values can be changed with `menuconfig` without altering parser semantics.
 
-The wind strip follows the same local-hour boundaries as the precipitation bars. “Breezy” starts at 20 km/h sustained or 30 km/h gusts; “Strong” at 30 or 40 km/h respectively. These descriptive bands are separate from the 60 km/h gust threshold for wind advice. A missing wind interval leaves a gap. Gold on the rail means daylight, even on a cloudy day. Unknown sunrise/sunset times are omitted; a confirmed polar day or night uses a single rail color.
+The wind strip follows the same local-hour boundaries as the precipitation bars. **Breezy** starts at 20 km/h sustained or gusts of 30, **Strong** at 30 or 40, and **Severe** at 70 or 90. Only relevant intervals get a band; the row disappears after the last one ends. Missing readings aren’t treated as calm. Wind and gust readings remain available in **Data & about**. Gold on the rail means daylight, even on a cloudy day. Unknown sunrise/sunset times are omitted; a confirmed polar day or night uses a single rail color.
 
 ## Advice rules
 
@@ -279,9 +281,11 @@ Convenience thresholds are application defaults, not official warning criteria:
 | Cold apparent temperature | -15 C |
 | High UV | 6 |
 
-Priority is deterministic: applicable official warnings/watches can override forecast-derived advice; then thunderstorm risk, ice, heat/cold, poor air quality (high/very high AQHI or US AQI of 151+), strong gusts, heavy rain, snow, routine rain, optional UV, and ordinary clothing advice. Strong wind with rain recommends a rain jacket instead of an umbrella. Open-Meteo thunderstorm codes are phrased as forecast risk, not nearby detected lightning.
+Weather advice uses **yellow for caution, orange for warning, and red for danger**, with a text label as well as color. Ordinary clothing advice stays neutral. By default, rain turns orange at 7.5 mm in an hour or 20 mm remaining, and red at 30 or 60 mm respectively. Snow turns orange at 4 cm in an hour or 8 cm remaining, and red at 8 or 20 cm. High UV is orange at index 6 and red at 11. The forecast banner selects the highest impact first; for equal impacts it prioritizes thunderstorms, ice, heat/cold, unhealthy air, wind, heavy rain, snow, rain, then UV. Where appropriate, strong gusts with rain recommend a rain jacket instead of an umbrella. Thunderstorms and hail are forecast risks, not detected lightning.
 
-Remaining-day rain prorates a currently active provider hour by its elapsed fraction and marks the result approximate. This is an estimate from an hourly model interval, not exact minute-by-minute onset. A current dry interval does not make a later exact total approximate.
+Official warnings and watches can take precedence. The color supplied by the issuing authority is preserved, including for a yellow warning. Hourly precipitation stays muted; stronger hours have a colored cap, and wind and UV bands use dark lettering on the severity color.
+
+The umbrella banner shows the expected liquid rain (rain plus showers) for the next continuous rain window, e.g. “4mm of rain expected 11am-5pm. Strong wind 2-5pm.” A later shower after a dry or missing hour isn’t included in that amount. If the window is already underway, the banner shows only what is still expected, e.g. “About 0.6mm of rain expected until 5pm.” Partial hourly amounts are prorated to the time remaining before local midnight. A partially elapsed dry hour does not make a later total approximate.
 
 Routine dry-day clothing advice requires known liquid-rain fields across all
 remaining forecast intervals. Mixed known-zero and missing intervals produce
@@ -445,7 +449,7 @@ After flashing, run this concrete device checklist:
 7. Confirm stale weather, stale AQHI, alert-feed failure with an active cached alert, AQHI 10+, and missing/null fields.
 8. Compare provider timestamps and chart intervals against the Data & about screen and the raw API response.
 
-Version 1.0.28 completed a physical boot and Wi-Fi reconnect check on the 7B. Version 1.0.29 adds touch-wake and brightness fixes. See the [build report](BUILD_REPORT.md) for the tests and hardware coverage, and the [wake troubleshooting guide](docs/proximity-setup.md#distinguishing-a-timeout-from-a-restart) for an intermittent black screen.
+See the [1.0.30 build report](BUILD_REPORT.md) for release tests and hardware coverage, [dashboard QA](design-qa.md) for the wind, holiday and warning screens, and the [wake troubleshooting guide](docs/proximity-setup.md#distinguishing-a-timeout-from-a-restart) for an intermittent black screen.
 
 ## Attribution and licenses
 

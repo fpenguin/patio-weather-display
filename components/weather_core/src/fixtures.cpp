@@ -128,14 +128,14 @@ const char* fixture_name(FixtureId id) {
         "heat", "cold", "poor-air-quality", "high-uv", "weather-unavailable",
         "negative-temperature", "extreme-precipitation", "missing-values", "aqhi-10-plus",
         "stale-air-quality", "stale-weather", "multiple-alerts", "long-text",
-        "alert-feed-failure", "unsupported-coverage", "minimal-rain"};
+        "alert-feed-failure", "unsupported-coverage", "minimal-rain", "sunny-uv", "cloudy-holiday", "snow-wind","storm-danger"};
     const auto index = static_cast<std::size_t>(id);
     return index < sizeof(names) / sizeof(names[0]) ? names[index] : "baseline";
 }
 
 bool fixture_from_name(const char* name, FixtureId& output) {
     if (!name) return false;
-    for (std::size_t i = 0; i <= static_cast<std::size_t>(FixtureId::MinimalRain); ++i) {
+    for (std::size_t i = 0; i <= static_cast<std::size_t>(FixtureId::StormDanger); ++i) {
         if (std::strcmp(name, fixture_name(static_cast<FixtureId>(i))) == 0) {
             output = static_cast<FixtureId>(i);
             return true;
@@ -148,6 +148,48 @@ void make_fixture(FixtureId id, DashboardModel& model) {
     baseline(model);
     switch (id) {
         case FixtureId::BaselineRain: break;
+        case FixtureId::StormDanger: {
+            clear_rain(model);
+            const float mm[]={4,24,8};
+            for(int i=0;i<3;++i) {
+                model.weather.hours[6+i].rain_mm.value=mm[i];
+                model.weather.hours[6+i].weather_code.value=i==0?65:95;
+            }
+            break;
+        }
+        case FixtureId::SunnyUv:
+            clear_rain(model);
+            set_date(model,kBaselineUtc+3*86400);
+            model.weather.current_temperature_c.value=23; model.weather.current_apparent_c.value=24;
+            model.weather.current_weather_code.value=0;
+            for (int i=0;i<18;++i) {
+                model.weather.hours[i].apparent_temperature_c.value=23;
+                model.weather.hours[i].weather_code.value=0;
+            }
+            for(int i=6;i<9;++i) model.weather.hours[i].uv_index.value=i==7?7:6;
+            model.air_quality.scale.assign("US AQI"); model.air_quality.display_index.value=28;
+            break;
+        case FixtureId::CloudyHoliday:
+            clear_rain(model);
+            set_date(model,1790790120LL);
+            model.weather.current_temperature_c.value=10; model.weather.current_apparent_c.value=8;
+            model.air_quality.display_index.value=2; model.air_quality.raw_aqhi.value=2;
+            for(int i=0;i<18;++i) {
+                model.weather.hours[i].weather_code.value=3;
+                model.weather.hours[i].apparent_temperature_c.value=i>=6 && i<12?13:8;
+            }
+            break;
+        case FixtureId::SnowWind: {
+            clear_rain(model);
+            model.weather.current_temperature_c.value=-1; model.weather.current_apparent_c.value=-6;
+            const float amounts[]={1,2,4,2};
+            for(int i=0;i<4;++i) {
+                model.weather.hours[6+i].weather_code.value=73;
+                model.weather.hours[6+i].snowfall_cm.value=amounts[i];
+            }
+            for(int i=8;i<11;++i) model.weather.hours[i].gust_kmh.value=47;
+            break;
+        }
         case FixtureId::MinimalRain: {
             set_date(model, kBaselineUtc + 2 * 86400);
             clear_rain(model);
@@ -336,6 +378,13 @@ void make_fixture(FixtureId id, DashboardModel& model) {
         if (t.valid) {
             day.high_c = Optional<float>::some(t.value + 2);
             day.low_c = Optional<float>::some(t.value - 3);
+        }
+        if(id==FixtureId::CloudyHoliday || id==FixtureId::SunnyUv) {
+            const bool sunny=id==FixtureId::SunnyUv;
+            day.high_c.value=sunny?25:13; day.low_c.value=sunny?16:7;
+            day.sunrise_utc=midnight+(sunny?380:430)*60;
+            day.sunset_utc=midnight+(sunny?1060:1132)*60;
+            day.daylight_seconds.value=day.sunset_utc-day.sunrise_utc;
         }
     }
     finalize_advice(model);

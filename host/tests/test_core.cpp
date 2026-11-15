@@ -3,6 +3,8 @@
 #include "weather/proximity.hpp"
 #include "weather/location_lookup.hpp"
 #include "weather/fixtures.hpp"
+#include "weather/forecast_refresh.hpp"
+#include "weather/severity.hpp"
 #include "weather/holidays.hpp"
 #include "weather/rainfall.hpp"
 #include "weather/time_zone.hpp"
@@ -511,12 +513,12 @@ TEST(dry_banner_yields_to_active_advisories_and_statements) {
 TEST(rain_advice_formats_both_endpoints_and_midnight) {
     struct Scenario { int first; int end; const char* expected; };
     const Scenario scenarios[] = {
-        {9, 11, "Waterproof layer • Rain 9–11 AM"},
-        {11, 13, "Waterproof layer • Rain 11 AM–1 PM"},
-        {11, 12, "Waterproof layer • Rain 11 AM–12 PM"},
-        {12, 14, "Waterproof layer • Rain 12–2 PM"},
-        {23, 24, "Waterproof layer • Rain 11 PM–midnight"},
-        {0, 1, "Waterproof layer • Rain 12–1 AM"},
+        {9, 11, "2mm of rain expected 9-11am."},
+        {11, 13, "2mm of rain expected 11am-1pm."},
+        {11, 12, "1mm of rain expected 11am-12pm."},
+        {12, 14, "2mm of rain expected 12-2pm."},
+        {23, 24, "1mm of rain expected 11pm-midnight."},
+        {0, 1, "1mm of rain expected 12-1am."},
     };
     for (const auto& scenario : scenarios) {
         WeatherSnapshot weather{};
@@ -561,10 +563,18 @@ TEST(daylight_uses_local_dates_and_real_events) {
 
 TEST(dressing_advice_and_wind_share_timed_intervals) {
     auto m=make_fixture(FixtureId::MinimalRain);
-    CHECK(m.advice.supporting=="Waterproof layer • Rain 11 AM–5 PM • Strong wind 2–5 PM");
+    CHECK(m.advice.supporting=="6.1mm of rain expected 11am-5pm. Strong wind 2-5pm.");
     AdviceInput in{&m.weather,&m.air_quality,&m.alerts,m.now_utc,m.weather.hours[17].interval_end_utc};
+    // Rain plus showers total 4mm for this spell. The 5–6pm trace and the
+    // separate evening shower must not inflate the amount attached to 11–5.
+    const float rain[] = {0.25F, 0.5F, 0.5F, 1.0F, 0.5F, 1.0F};
+    for (unsigned i = 0; i < 6; ++i) m.weather.hours[5+i].rain_mm.value = rain[i];
+    m.weather.hours[5].showers_mm.value = 0.25F;
+    m.weather.hours[14].rain_mm.value = 2;
+    CHECK(choose_advice(in).headline=="Take an umbrella");
+    CHECK(choose_advice(in).supporting=="4mm of rain expected 11am-5pm. Strong wind 2-5pm.");
     in.clock_24_hour=true;
-    CHECK(choose_advice(in).supporting=="Waterproof layer • Rain 11:00–17:00 • Strong wind 14:00–17:00");
+    CHECK(choose_advice(in).supporting=="4mm of rain expected 11:00-17:00. Strong wind 14:00-17:00.");
     auto& hour=m.weather.hours[8];
     CHECK(wind_exposure(hour)==Exposure::Strong);
     hour.weather_code=Optional<int>::some(99);
@@ -572,7 +582,7 @@ TEST(dressing_advice_and_wind_share_timed_intervals) {
     CHECK(wind_exposure(HourlyWeather{})==Exposure::Unknown);
     auto dry=make_fixture(FixtureId::OrdinaryDry);
     in.weather=&dry.weather; in.now_utc=dry.now_utc; in.air_quality=&dry.air_quality;
-    CHECK(choose_advice(in).headline=="Pack a light layer");
+    CHECK(choose_advice(in).headline=="Bring a light jacket");
     dry.air_quality.scale.assign("US AQI"); dry.air_quality.display_index.value=173;
     CHECK(choose_advice(in).kind==AdviceKind::PoorAirQuality);
 }
@@ -588,15 +598,15 @@ TEST(rain_advice_uses_next_contiguous_window) {
         sample.local_start_minute = index * 60;
         sample.local_end_minute = (index + 1) * 60;
     }
-    CHECK(choose(&weather, 8 * 3600).supporting == "Waterproof layer • Rain 9–11 AM");
-    CHECK(choose(&weather, 11 * 3600).supporting == "Waterproof layer • Rain 3–5 PM");
+    CHECK(choose(&weather, 8 * 3600).supporting == "2mm of rain expected 9-11am.");
+    CHECK(choose(&weather, 11 * 3600).supporting == "2mm of rain expected 3-5pm.");
     // A gap in source data is not permission to join two windows.
     weather.hours[10].rain_mm = Optional<float>::none();
-    CHECK(choose(&weather, 8 * 3600).supporting == "Waterproof layer • Rain 9–10 AM");
+    CHECK(choose(&weather, 8 * 3600).supporting == "1mm of rain expected 9-10am.");
     // A clock resync backwards recomputes the next window; no cached window
     // from the previous call survives.
-    CHECK(choose(&weather, 16 * 3600).supporting == "Waterproof layer • Rain 4–5 PM");
-    CHECK(choose(&weather, 8 * 3600).supporting == "Waterproof layer • Rain 9–10 AM");
+    CHECK(choose(&weather, 16 * 3600).supporting == "1mm of rain expected 4-5pm.");
+    CHECK(choose(&weather, 8 * 3600).supporting == "1mm of rain expected 9-10am.");
 }
 
 TEST(ongoing_rain_hour_does_not_become_dry_after_proration) {
@@ -615,11 +625,38 @@ TEST(ongoing_rain_hour_does_not_become_dry_after_proration) {
     CHECK_NEAR(amount.millimetres, 1.0F / 6.0F, 0.001F);
     const Advice advice = choose(&weather, now);
     CHECK(advice.kind == AdviceKind::Rain);
-    CHECK(advice.supporting == "Waterproof layer • Rain 4–5 PM");
-    CHECK(choose(&weather, 17 * 3600 - 1).kind == AdviceKind::Rain);
+    CHECK(advice.supporting == "About 0.2mm of rain expected until 5pm.");
+    CHECK(choose(&weather, 17 * 3600 - 1).supporting == "<0.1mm of rain expected until 5pm.");
     CHECK(choose(&weather, 17 * 3600).kind == AdviceKind::Dry);
     weather.hours[0].gust_kmh = Optional<float>::some(70.0F);
     CHECK(choose(&weather, now).supporting == "Choose a rain jacket instead of an umbrella");
+}
+
+TEST(umbrella_totals_respect_midnight_and_light_showers) {
+    WeatherSnapshot w{};
+    w.status.state = SourceState::Fresh;
+    w.hours[0] = hour(0, 3);
+    w.hours[0].local_start_minute = 23 * 60 + 45;
+    w.hours[0].local_end_minute = 1440;
+    w.hour_count = 1;
+    AdviceInput in{&w, nullptr, nullptr, 0, 15 * 60};
+    CHECK(choose_advice(in).supporting == "About 0.8mm of rain expected 11:45pm-midnight.");
+
+    // No individual hour qualifies for an umbrella, but three contiguous
+    // light showers do. The missing fourth hour has no invented amount/time.
+    in.local_day_end_utc = 86400;
+    w.hour_count = 4;
+    for (int i = 0; i < 3; ++i) {
+        w.hours[i] = hour((9+i)*3600, 0);
+        w.hours[i].showers_mm = Optional<float>::some(0.1F);
+        w.hours[i].local_start_minute = (9+i)*60;
+        w.hours[i].local_end_minute = (10+i)*60;
+    }
+    w.hours[3].interval_start_utc = 12*3600;
+    w.hours[3].interval_end_utc = 13*3600;
+    CHECK(choose_advice(in).supporting == "0.3mm of rain expected 9am-12pm.");
+    w.hours[0].local_start_minute = -1;
+    CHECK(choose_advice(in).supporting == "0.3mm of rain expected.");
 }
 
 TEST(optional_convenience_advice_can_be_disabled_without_hiding_safety) {
@@ -892,6 +929,76 @@ TEST(approach_extends_one_uninterrupted_reading_session) {
     CHECK(step(83000,RangeSample::Near)==0);
     CHECK(step(83250,RangeSample::Near)==85); // a fresh approach also starts bright
     CHECK(step(113250,RangeSample::Near)==0);
+}
+
+TEST(forecast_retries_recover_without_waiting_a_poll_interval) {
+    ForecastRefresh schedule;
+    std::int64_t clock=10000;
+    CHECK(schedule.due(clock));
+    for (int seconds : {30,60,120,300,300}) {
+        schedule.finish(clock,900,true);
+        CHECK_EQ(schedule.wait_ms(clock),seconds*1000);
+        clock+=seconds*1000;
+        CHECK(!schedule.due(clock-1) && schedule.due(clock));
+    }
+    schedule.finish(clock,900);
+    CHECK(!schedule.due(clock+899999) && schedule.due(clock+900000));
+    CHECK(schedule.due(clock+1,true));
+    schedule.finish(clock,900,true);
+    CHECK_EQ(schedule.wait_ms(clock),30000);
+    schedule.finish(clock,900); // Permanent errors also use normal polling.
+    CHECK_EQ(schedule.wait_ms(clock),900000);
+}
+
+TEST(forecast_respects_provider_wait_on_reconnect_tap_and_location_change) {
+    const auto now=utc_epoch(2026,11,15,12);
+    CHECK_EQ(retry_after_seconds("Sun, 15 Nov 2026 12:06:00 GMT",now),360U);
+    CHECK_EQ(retry_after_seconds("Sun, 15 Nov 2026 11:59:00 GMT",now),0U);
+    CHECK_EQ(retry_after_seconds(" 420 ",now),420U);
+    CHECK_EQ(retry_after_seconds("42x",now),0U);
+    CHECK_EQ(retry_after_seconds("Sun, 15 Nov 2026 25:00:00 GMT",now),0U);
+    for(int status : {408,425,429,500,502,503,504}) CHECK(transient_forecast_http(status));
+    for(int status : {200,400,401,403,404,501}) CHECK(!transient_forecast_http(status));
+    ForecastRefresh schedule;
+    schedule.finish(1000,900,true,360);
+    CHECK_EQ(schedule.wait_ms(31000),330000);
+    CHECK(!schedule.due(31000,true));
+    schedule.reset();
+    CHECK(!schedule.due(360999,true) && schedule.due(361000));
+}
+
+TEST(failed_refresh_preserves_fresh_cache_until_the_source_actually_ages_out) {
+    SourceStatus status{}; status.state=SourceState::Fresh;
+    status.source_time_utc=10000; status.fetched_time_utc=11000;
+    CHECK(weather_after_failure(status,false,12000,10800)==SourceState::Unavailable);
+    CHECK(weather_after_failure(status,true,20800,10800)==SourceState::Fresh);
+    CHECK(weather_after_failure(status,true,20801,10800)==SourceState::Stale);
+    status.state=SourceState::Stale;
+    CHECK(weather_after_failure(status,true,12000,10800)==SourceState::Stale);
+}
+
+TEST(forecast_colours_follow_impact_and_preserve_the_issuing_authoritys_colour) {
+    AdviceThresholds t{};
+    CHECK(rain_impact(1,4,t)==Severity::Caution && rain_impact(7.5,8,t)==Severity::Warning);
+    CHECK(rain_impact(5,60,t)==Severity::Danger && rain_impact(30,30,t)==Severity::Danger);
+    CHECK(snow_impact(1,3)==Severity::Caution && snow_impact(4,9)==Severity::Warning && snow_impact(2,20)==Severity::Danger);
+    CHECK(wind_impact(19,29)==Severity::None && wind_impact(20,29)==Severity::Caution);
+    CHECK(wind_impact(19,40)==Severity::Warning && wind_impact(19,90)==Severity::Danger);
+    CHECK(uv_impact(7,t)==Severity::Warning && uv_impact(11,t)==Severity::Danger);
+    CHECK(heat_impact(40,t)==Severity::Danger && cold_impact(-25,t)==Severity::Danger);
+    auto wx=base_weather();
+    wx.hours[0].rain_mm.value=1; wx.hours[0].uv_index=Optional<float>::some(11);
+    CHECK(choose(&wx).kind==AdviceKind::HighUv && choose(&wx).severity==Severity::Danger);
+    wx.hours[0].uv_index={}; wx.hours[0].rain_mm.value=32; wx.hours[0].snowfall_cm=Optional<float>::some(1);
+    CHECK(choose(&wx).kind==AdviceKind::HeavyRain && choose(&wx).severity==Severity::Danger);
+    auto snow=make_fixture(FixtureId::SnowWind);
+    CHECK(snow.advice.severity==Severity::Warning && snow.advice.supporting=="9 cm of snow 12-4pm. Strong wind 2-5pm.");
+    const auto storm=make_fixture(FixtureId::StormDanger);
+    CHECK(storm.advice.severity==Severity::Danger && storm.advice.supporting=="Storm risk 1-3pm. 36mm of rain expected 12-3pm.");
+    WeatherAlert a; a.type=AlertType::Warning; a.risk_colour.assign("yellow");
+    CHECK(official_impact(a)==Severity::Caution);
+    a.type=AlertType::Statement; a.risk_colour.assign("red");
+    CHECK(official_impact(a)==Severity::Danger);
 }
 
 TEST(coordinate_lookup_recovers_without_another_tap) {

@@ -1,8 +1,16 @@
 # Build and test report
 
+## 1.0.30 public release — November 15, 2026
+
+The live-provider application is 2,098,400 bytes. It has 2,947,872 bytes free (about 58%) in each OTA slot. A clean ESP-IDF 5.5.2 build reported a valid application checksum and SHA-256 validation hash. All seven host suites passed (38 core cases). GCC reported 311 project stack frames, a 2,672-byte maximum, and no violations of the 4,096-byte limit.
+
+The release simulator reproduced the five [dashboard previews](screenshots/dashboard) byte for byte. Coverage includes the full statutory holiday line during a storm, one-hour wind labels, the transition back to a quiet timeline, mixed rain and snow, and retry/backoff behavior with cached data and provider rate limits.
+
+The preview was flashed to a Waveshare 7B, booted, and returned a live dashboard over USB. All six loadable ESP32-S3 segment addresses and lengths match the individually built 1.0.30 release. The only payload bytes that differ are in the application descriptor's version, compilation timestamps, and ELF fingerprint. The final versioned image was not separately flashed. See the [release notes](RELEASE_NOTES.md) for download and installation options.
+
 ## 1.0.29 public release — November 15, 2026
 
-The dedicated release build passed all seven host suites (33 core cases), and the 1024 × 600 rainy-day render matched the dashboard preview byte for byte. ESP-IDF 5.5.2 produced a 2,080,112-byte live-provider application with 59% of the smallest OTA slot free. Compiler stack reports covered 302 project frames: maximum 2,672 bytes, zero violations of the 4,096-byte limit. See [release notes](RELEASE_NOTES.md) for the install files and [native dashboard QA](design-qa.md) for the display checks.
+The dedicated release build passed all seven host suites (33 core cases), and the 1024 × 600 rainy-day render matched the dashboard preview byte for byte. ESP-IDF 5.5.2 produced a 2,080,112-byte live-provider application with 59% of the smallest OTA slot free. Compiler stack reports covered 302 project frames: maximum 2,672 bytes, zero violations of the 4,096-byte limit. See the [1.0.29 release](https://github.com/fpenguin/patio-weather-display/releases/tag/v1.0.29) for its install files.
 
 The prior 1.0.28 image booted on the board, restored cached data and reconnected to Wi-Fi. The panel later came back on after an intermittent blackout; USB serial was unavailable for that event, so its cause is unknown. For 1.0.29, host tests injected GT911 input without an interrupt, bus and acknowledgement failures, a lost release interrupt, and old settings containing 0% reading brightness. The 1.0.29 image has not been flashed to that board.
 

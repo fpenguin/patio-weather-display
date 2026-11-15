@@ -17,7 +17,8 @@ config PATIO_FIXTURE_NAME
         cold, poor-air-quality, high-uv, weather-unavailable,
         negative-temperature, extreme-precipitation, missing-values,
         aqhi-10-plus, stale-air-quality, stale-weather, multiple-alerts,
-        long-text, alert-feed-failure, or unsupported-coverage.
+        long-text, alert-feed-failure, unsupported-coverage, minimal-rain,
+        sunny-uv, cloudy-holiday, snow-wind, or storm-danger.
 
 config PATIO_HTTP_USER_AGENT
     string "Identifying HTTP User-Agent"
@@ -30,6 +31,10 @@ config PATIO_WEATHER_REFRESH_SECONDS
     int "Weather refresh interval"
     range 600 3600
     default 900
+    help
+        Regular interval for successful weather polling. Temporary connection
+        failures retry at 30, 60, 120 and then 300 seconds while online.
+        Provider Retry-After limits are honored.
 
 config PATIO_AQHI_REFRESH_SECONDS
     int "AQHI refresh interval"

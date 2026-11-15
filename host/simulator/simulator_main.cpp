@@ -55,7 +55,7 @@ bool render_png(const char* path) {
 
 void usage(const char* executable) {
     std::fprintf(stderr,
-        "usage: %s [--fixture NAME] [--screen home|settings|holidays|air|display|location|location-ambiguous|wifi|wifi-crowded|wifi-manual|details|debug|first-run|preset|international-home|international-air|holiday-seoul|holiday-boston] --output FILE.png\n",
+        "usage: %s [--fixture NAME] [--screen home|settings|holidays|air|display|location|location-ambiguous|wifi|wifi-crowded|wifi-manual|details|debug|first-run|preset|international-home|international-air|holiday-seoul|holiday-boston|mixed-alert-details] --output FILE.png\n",
         executable);
 }
 
@@ -84,6 +84,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "unknown fixture: %s\n", fixture_text);
         return 2;
     }
+    const bool mixed_details=std::strcmp(screen,"mixed-alert-details")==0;
+    if(mixed_details) { fixture=patio::FixtureId::MixedAlerts; fixture_text=patio::fixture_name(fixture); }
 
     lv_init();
     static std::vector<lv_color_t> draw_buffer(static_cast<std::size_t>(kWidth) * 80U);
@@ -165,6 +167,13 @@ int main(int argc, char** argv) {
         }
     } else if(intl || korea || boston) {
         if(!std::strcmp(screen,"international-air")) patio::ui::show_air_quality_settings(ui);
+    } else if(mixed_details) {
+        auto* block=find_label(lv_scr_act(),"+2 more");
+        if(!block) { std::fprintf(stderr,"overlapping forecast block missing\n"); return 1; }
+        while(block && !lv_obj_has_flag(block,LV_OBJ_FLAG_CLICKABLE)) block=lv_obj_get_parent(block);
+        if(!block) return 1;
+        lv_event_send(block,LV_EVENT_CLICKED,nullptr);
+        if(!find_label(lv_scr_act(),"Forecast alerts")) return 1;
     } else if (std::strcmp(screen, "settings") == 0) patio::ui::show_settings(ui);
     else if (std::strcmp(screen, "holidays") == 0) patio::ui::show_holiday_settings(ui);
     else if (std::strcmp(screen, "air") == 0) patio::ui::show_air_quality_settings(ui);

@@ -178,6 +178,20 @@ void draw_snowflake(IconPainter & p, std::int32_t cx, std::int32_t cy, std::int3
            cx + b * 866 / 1000 - twig / 2, cy + b / 2 - twig);
 }
 
+// At 15 px the banner snowflake's thick branches fill in. Use six distinct
+// single-pixel stems with outward-facing twigs on the narrow forecast blocks.
+void draw_compact_snow(IconPainter & p)
+{
+    constexpr int arms[][2]={{1000,0},{500,866},{-500,866},{-1000,0},{-500,-866},{500,-866}};
+    for(const auto& arm : arms) {
+        const int x=arm[0], y=arm[1];
+        p.line(500,500,500+x*465/1000,500+y*465/1000,1);
+        for(int side : {-1,1})
+            p.line(500+x*205/1000,500+y*205/1000,
+                   500+(x*315-side*y*100)/1000,500+(y*315+side*x*100)/1000,1);
+    }
+}
+
 void draw_small_sun(IconPainter & p, std::int32_t cx, std::int32_t cy, std::int32_t r)
 {
     p.filled_circle(cx, cy, r);
@@ -377,6 +391,10 @@ void draw_icon(lv_event_t * event)
         case IconKind::jacket: draw_jacket(painter); break;
         case IconKind::boot: draw_boot(painter); break;
         case IconKind::sun_hat: draw_sun_hat(painter); break;
+        case IconKind::hail:
+            draw_cloud(painter,0,-125,1000,1000);
+            painter.filled_circle(310,730,64); painter.filled_circle(515,842,64); painter.filled_circle(708,730,64);
+            break;
         case IconKind::settings_sliders:
             draw_settings_sliders(painter);
             break;
@@ -409,7 +427,8 @@ void draw_icon(lv_event_t * event)
             draw_wind(painter);
             break;
         case IconKind::snow:
-            draw_snowflake(painter, 500, 500, 410);
+            if(lv_area_get_width(&bounds)<=22) draw_compact_snow(painter);
+            else draw_snowflake(painter, 500, 500, 410);
             break;
         case IconKind::ice:
             draw_ice(painter);

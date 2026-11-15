@@ -4,6 +4,7 @@
 #include "weather/location_lookup.hpp"
 #include "weather/fixtures.hpp"
 #include "weather/forecast_refresh.hpp"
+#include "weather/forecast_strip.hpp"
 #include "weather/severity.hpp"
 #include "weather/holidays.hpp"
 #include "weather/rainfall.hpp"
@@ -999,6 +1000,102 @@ TEST(forecast_colours_follow_impact_and_preserve_the_issuing_authoritys_colour) 
     CHECK(official_impact(a)==Severity::Caution);
     a.type=AlertType::Statement; a.risk_colour.assign("red");
     CHECK(official_impact(a)==Severity::Danger);
+}
+
+TEST(hourly_blocks_distinguish_impact_and_honour_uv_preferences) {
+    using K=ForecastHazard; using S=Severity;
+    HourlyWeather h{}; AdviceThresholds t{};
+    CHECK(hourly_hazards(h,t,true).count()==0);
+    h.rain_mm=Optional<float>::some(0.3F); h.snowfall_cm=Optional<float>::some(1);
+    h.gust_kmh=Optional<float>::some(25); h.uv_index=Optional<float>::some(2);
+    CHECK(hourly_hazards(h,t,true).count()==0); // Rain and flurries still get chart bars.
+    h.uv_index.value=3; CHECK(hourly_hazards(h,t,true)[K::UV]==S::Caution);
+    h.uv_index.value=6; CHECK(hourly_hazards(h,t,true)[K::UV]==S::Warning);
+    h.uv_index.value=11; CHECK(hourly_hazards(h,t,true)[K::UV]==S::Danger);
+    CHECK(hourly_hazards(h,t,false)[K::UV]==S::None);
+    t.high_uv_index=8;
+    for(float u : {4.F,7.F}) { h.uv_index.value=u; CHECK(hourly_hazards(h,t,true)[K::UV]==S::None); }
+    h.uv_index={}; h.rain_mm.value=5; h.showers_mm=Optional<float>::some(2.5F);
+    h.snowfall_cm.value=4; h.gust_kmh.value=40; h.weather_code=Optional<int>::some(95);
+    auto hazards=hourly_hazards(h,t,true);
+    CHECK(hazards.count()==4 && hazards[K::Rain]==S::Warning && hazards[K::Snow]==S::Warning &&
+          hazards[K::Wind]==S::Warning && hazards.strongest()==K::Storm);
+    h.weather_code.value=96; h.snowfall_cm.value=8; h.rain_mm.value=30;
+    hazards=hourly_hazards(h,t,true);
+    CHECK(hazards[K::Hail]==S::Danger && hazards[K::Storm]==S::None &&
+          hazards[K::Snow]==S::Danger && hazards[K::Rain]==S::Danger && hazards[K::Wind]==S::Warning);
+    h={}; h.weather_code=Optional<int>::some(75);
+    CHECK(hourly_hazards(h,t,true)[K::Snow]==S::Warning); // Provider supplied a code but no measured cm.
+    h.snowfall_cm=Optional<float>::some(0.5F);
+    CHECK(hourly_hazards(h,t,true)[K::Snow]==S::None);
+    h.weather_code.value=82; CHECK(hourly_hazards(h,t,true)[K::Rain]==S::Warning);
+    h.rain_mm=Optional<float>::some(1); h.showers_mm=Optional<float>::some(0);
+    CHECK(hourly_hazards(h,t,true)[K::Rain]==S::None);
+    h.weather_code.value=67; CHECK(hourly_hazards(h,t,true)[K::Ice]==S::Danger);
+    h.apparent_temperature_c=Optional<float>::some(40); CHECK(hourly_hazards(h,t,true)[K::Heat]==S::Danger);
+    h.apparent_temperature_c.value=-25; CHECK(hourly_hazards(h,t,true)[K::Cold]==S::Danger);
+}
+
+const ForecastBlock* block_at(const ForecastStrip& strip,int from,int to,ForecastHazard kind) {
+    for(std::size_t i=0;i<strip.count;++i) {
+        const auto& b=strip.blocks[i];
+        if(b.from==from && b.to==to && b.hazards[kind]!=Severity::None) return &b;
+    }
+    return nullptr;
+}
+
+TEST(hourly_blocks_keep_overlaps_and_expire_at_the_end_of_each_window) {
+    using K=ForecastHazard;
+    auto d=make_fixture(FixtureId::MixedAlerts);
+    ForecastStrip strip{};
+    build_forecast_strip(d.weather,d.local_now,d.now_utc,{},true,strip);
+    const auto* caution=block_at(strip,600,780,K::UV);
+    const auto* high=block_at(strip,780,900,K::UV);
+    const auto* storm=block_at(strip,960,1080,K::Storm);
+    const auto* extra=block_at(strip,960,1080,K::Rain);
+    CHECK(strip.stacked && !strip.wind_gap && caution && high && storm && extra);
+    CHECK(caution->hazards[K::UV]==Severity::Caution && high->hazards[K::UV]==Severity::Warning);
+    CHECK(storm->lane!=extra->lane && storm->hazards.count()==1 && extra->hazards.count()==2 &&
+          extra->hazards[K::Wind]==Severity::Warning && extra->hazards[K::Rain]==Severity::Warning);
+    CHECK(strip.next_change_utc==d.weather.hours[7].interval_start_utc);
+    d=make_fixture(FixtureId::SnowWind);
+    build_forecast_strip(d.weather,d.local_now,d.now_utc,{},true,strip);
+    const auto* snow=block_at(strip,840,900,K::Snow);
+    const auto* wind=block_at(strip,840,1020,K::Wind);
+    CHECK(strip.count==2 && strip.stacked && snow && wind && snow->lane!=wind->lane);
+    auto later=d.local_now; later.hour=15; later.minute=0;
+    build_forecast_strip(d.weather,later,d.weather.hours[9].interval_start_utc,{},true,strip);
+    CHECK(strip.count==1 && !strip.stacked && block_at(strip,840,1020,K::Wind));
+    later.hour=17;
+    build_forecast_strip(d.weather,later,d.weather.hours[11].interval_start_utc,{},true,strip);
+    CHECK(strip.count==0 && !strip.wind_gap && strip.next_change_utc==0);
+}
+
+TEST(hourly_blocks_require_real_coverage_and_do_not_bridge_gaps) {
+    using K=ForecastHazard;
+    auto d=make_fixture(FixtureId::CloudyHoliday);
+    auto& w=d.weather;
+    for(std::size_t i=0;i<w.hour_count;++i) {
+        auto& h=w.hours[i];
+        h.local_start_minute+=15; h.local_end_minute+=15;
+        h.interval_start_utc+=900; h.interval_end_utc+=900;
+        h.wind_kmh={}; h.gust_kmh={};
+    }
+    for(int i : {6,7,9,10}) w.hours[i].gust_kmh=Optional<float>::some(45);
+    w.hours[10].local_date_key++; // Not part of today's rail.
+    ForecastStrip strip{};
+    build_forecast_strip(w,d.local_now,d.now_utc,{},true,strip);
+    CHECK(strip.count==2 && strip.wind_gap && strip.have_wind &&
+          block_at(strip,735,855,K::Wind) && block_at(strip,915,975,K::Wind));
+    w.hours[7].interval_start_utc+=60; // Even adjacent local labels cannot join across a UTC gap.
+    build_forecast_strip(w,d.local_now,d.now_utc,{},true,strip);
+    CHECK(strip.count==3 && block_at(strip,735,795,K::Wind) && block_at(strip,795,855,K::Wind));
+    w.status.state=SourceState::Unavailable;
+    build_forecast_strip(w,d.local_now,d.now_utc,{},true,strip);
+    CHECK(strip.count==0 && !strip.wind_gap);
+    w.status.state=SourceState::Fresh;
+    build_forecast_strip(w,{},d.now_utc,{},true,strip);
+    CHECK(strip.count==0 && !strip.wind_gap);
 }
 
 TEST(coordinate_lookup_recovers_without_another_tap) {

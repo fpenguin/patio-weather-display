@@ -4,7 +4,7 @@ Dedicated native ESP-IDF/LVGL firmware for the **Waveshare ESP32-S3-Touch-LCD-7B
 
 The firmware is not a screenshot or browser shell. The dashboard, chart, icons, settings, keyboards, candidate lists, and warning banners are LVGL 8 objects drawn by the ESP32-S3.
 
-[Download firmware v1.0.30](https://github.com/fpenguin/patio-weather-display/releases/tag/v1.0.30) · [Release notes](RELEASE_NOTES.md) · [International QA](docs/international-qa.md)
+[Download firmware v1.0.31](https://github.com/fpenguin/patio-weather-display/releases/tag/v1.0.31) · [Release notes](RELEASE_NOTES.md) · [International QA](docs/international-qa.md)
 
 ![Rainy-day dashboard with hourly precipitation and a clothing recommendation](screenshots/dashboard/rain.png)
 
@@ -13,7 +13,7 @@ The repository is public for inspection and release distribution. No license has
 ## What is implemented
 
 - Local date and clock, outside temperature, feels-like, today’s high/low, and regional air quality. One bottom banner recommends what to wear or shows a higher-priority warning.
-- One 6 AM–midnight timeline: hourly ticks, labels every three hours, daylight in gold, and a cyan current-time marker. Rain (mm) and snow (cm) rise from the rail; dry hours with high UV use the same lane. The strip below appears for breezy, strong or severe wind, thunderstorm or hail risk. When the rest of the day is light, the chart uses that extra space.
+- One 6 AM–midnight timeline: hourly ticks, labels every three hours, daylight in gold, and a cyan current-time marker. Rain (mm), snow (cm) and high UV readings sit above the line. Below it, tappable weather symbols mark the hours to watch for wind, heavy rain or snow, UV, thunderstorms, hail, ice, heat or cold. Quiet days leave more room for the chart.
 - Open-Meteo current, hourly and daily weather. Each liquid bar is `rain + showers` for `[T-3600,T)`. Snow depth added during that hour is plotted separately, never converted to rain or multiplied by probability. Bars use stable scale steps (3/6/12/24/48/96 in the displayed unit); capped bars retain their amount label. Sunrise, sunset and the full-day high/low come from the daily forecast for the configured location and local date.
 - ECCC Canadian AQHI with explicit nearest-community selection and source observation time. AQHI 10+ is preserved. High AQHI alone is described as poor air quality, not wildfire smoke.
 - ECCC official alerts filtered with a geographic point intersection. Alert type, timing, IDs, impact, and feed-failure/cached-alert state are retained independently of weather and AQHI.
@@ -265,7 +265,9 @@ value can remain visible as stale.
 
 Default refresh and staleness values can be changed with `menuconfig` without altering parser semantics.
 
-The wind strip follows the same local-hour boundaries as the precipitation bars. **Breezy** starts at 20 km/h sustained or gusts of 30, **Strong** at 30 or 40, and **Severe** at 70 or 90. Only relevant intervals get a band; the row disappears after the last one ends. Missing readings aren’t treated as calm. Wind and gust readings remain available in **Data & about**. Gold on the rail means daylight, even on a cloudy day. Unknown sunrise/sunset times are omitted; a confirmed polar day or night uses a single rail color.
+Read each colored block against the hours directly above it. A snowflake with **Heavy**, for example, marks heavy snowfall during those hours; the bars still show how many centimetres are expected each hour. Two hazards can stack. If three or more coincide, the strongest stays visible; tap **+N more** for the others. Tap any block for its time range and available measurements. The blocks disappear when their forecast windows end, and light wind alone does not open the strip.
+
+The wind symbol reads **Breezy** from 20 km/h sustained or gusts of 30, **Strong** from 30 or 40, and **Severe** from 70 or 90. Missing wind readings aren't treated as calm. Wind and gust readings remain available in **Data & about**. Gold on the timeline means daylight even on a cloudy day. Unknown sunrise/sunset times are omitted; a confirmed polar day or night uses a single line color.
 
 ## Advice rules
 
@@ -283,7 +285,7 @@ Convenience thresholds are application defaults, not official warning criteria:
 
 Weather advice uses **yellow for caution, orange for warning, and red for danger**, with a text label as well as color. Ordinary clothing advice stays neutral. By default, rain turns orange at 7.5 mm in an hour or 20 mm remaining, and red at 30 or 60 mm respectively. Snow turns orange at 4 cm in an hour or 8 cm remaining, and red at 8 or 20 cm. High UV is orange at index 6 and red at 11. The forecast banner selects the highest impact first; for equal impacts it prioritizes thunderstorms, ice, heat/cold, unhealthy air, wind, heavy rain, snow, rain, then UV. Where appropriate, strong gusts with rain recommend a rain jacket instead of an umbrella. Thunderstorms and hail are forecast risks, not detected lightning.
 
-Official warnings and watches can take precedence. The color supplied by the issuing authority is preserved, including for a yellow warning. Hourly precipitation stays muted; stronger hours have a colored cap, and wind and UV bands use dark lettering on the severity color.
+With UV advice enabled, the strip also shows a yellow **UV caution** at index 3 up to 6 by default. It turns orange at 6 and red at 11. Raising the high-UV threshold above 6 hides the earlier cautions. Hourly precipitation stays muted; stronger hours have a colored cap. Official bulletins remain in the bottom banner and preserve the issuing authority's color.
 
 The umbrella banner shows the expected liquid rain (rain plus showers) for the next continuous rain window, e.g. “4mm of rain expected 11am-5pm. Strong wind 2-5pm.” A later shower after a dry or missing hour isn’t included in that amount. If the window is already underway, the banner shows only what is still expected, e.g. “About 0.6mm of rain expected until 5pm.” Partial hourly amounts are prorated to the time remaining before local midnight. A partially elapsed dry hour does not make a later total approximate.
 
@@ -389,13 +391,17 @@ cmake --build build-sim --target patio_weather_simulator --parallel
 ./build-sim/patio_weather_simulator \
   --fixture minimal-rain --screen home --output rainy-dashboard.png
 ./build-sim/patio_weather_simulator \
+  --fixture mixed-alerts --screen home --output mixed-alerts.png
+./build-sim/patio_weather_simulator \
+  --screen mixed-alert-details --output mixed-alert-details.png
+./build-sim/patio_weather_simulator \
   --fixture labour-day --screen home --output labour-day.png
 ./build-sim/patio_weather_simulator \
   --fixture baseline --screen settings --output settings.png
 ```
 
 Valid screens are `home`, `settings`, `holidays`, `air`, `display`, `location`,
-`location-ambiguous`, `wifi`, `wifi-crowded`, `wifi-manual`, and `details`.
+`location-ambiguous`, `wifi`, `wifi-crowded`, `wifi-manual`, `details`, and `mixed-alert-details`, among others.
 Output is the same 1024 x 600 LVGL object tree used by
 the firmware, rendered headlessly to PNG.
 
@@ -449,7 +455,7 @@ After flashing, run this concrete device checklist:
 7. Confirm stale weather, stale AQHI, alert-feed failure with an active cached alert, AQHI 10+, and missing/null fields.
 8. Compare provider timestamps and chart intervals against the Data & about screen and the raw API response.
 
-See the [1.0.30 build report](BUILD_REPORT.md) for release tests and hardware coverage, [dashboard QA](design-qa.md) for the wind, holiday and warning screens, and the [wake troubleshooting guide](docs/proximity-setup.md#distinguishing-a-timeout-from-a-restart) for an intermittent black screen.
+See the [1.0.31 build report](BUILD_REPORT.md) for release tests and hardware coverage, [dashboard QA](design-qa.md) for the hourly alerts, holiday and warning screens, and the [wake troubleshooting guide](docs/proximity-setup.md#distinguishing-a-timeout-from-a-restart) for an intermittent black screen.
 
 ## Attribution and licenses
 

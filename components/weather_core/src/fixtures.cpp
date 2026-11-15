@@ -128,14 +128,14 @@ const char* fixture_name(FixtureId id) {
         "heat", "cold", "poor-air-quality", "high-uv", "weather-unavailable",
         "negative-temperature", "extreme-precipitation", "missing-values", "aqhi-10-plus",
         "stale-air-quality", "stale-weather", "multiple-alerts", "long-text",
-        "alert-feed-failure", "unsupported-coverage", "minimal-rain", "sunny-uv", "cloudy-holiday", "snow-wind","storm-danger"};
+        "alert-feed-failure", "unsupported-coverage", "minimal-rain", "sunny-uv", "cloudy-holiday", "snow-wind","storm-danger","mixed-alerts"};
     const auto index = static_cast<std::size_t>(id);
     return index < sizeof(names) / sizeof(names[0]) ? names[index] : "baseline";
 }
 
 bool fixture_from_name(const char* name, FixtureId& output) {
     if (!name) return false;
-    for (std::size_t i = 0; i <= static_cast<std::size_t>(FixtureId::StormDanger); ++i) {
+    for (std::size_t i = 0; i <= static_cast<std::size_t>(FixtureId::MixedAlerts); ++i) {
         if (std::strcmp(name, fixture_name(static_cast<FixtureId>(i))) == 0) {
             output = static_cast<FixtureId>(i);
             return true;
@@ -148,6 +148,18 @@ void make_fixture(FixtureId id, DashboardModel& model) {
     baseline(model);
     switch (id) {
         case FixtureId::BaselineRain: break;
+        case FixtureId::MixedAlerts: {
+            clear_rain(model);
+            model.weather.current_weather_code.value=1;
+            model.weather.current_temperature_c.value=19; model.weather.current_apparent_c.value=17;
+            for(int i=4;i<9;++i) model.weather.hours[i].uv_index.value=i<7?4:7; // 10–1 caution, 1–3 high UV
+            for(int i=8;i<14;++i) model.weather.hours[i].gust_kmh.value=48;     // 2–8 wind
+            for(int i=10;i<12;++i) {                                          // 4–6 storm, rain, wind
+                model.weather.hours[i].weather_code.value=95;
+                model.weather.hours[i].rain_mm.value=i==10?12:8;
+            }
+            break;
+        }
         case FixtureId::StormDanger: {
             clear_rain(model);
             const float mm[]={4,24,8};

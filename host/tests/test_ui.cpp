@@ -282,7 +282,8 @@ int main() {
     for(auto& h:model.weather.hours) h.snowfall_cm=patio::Optional<float>::some(2.3f);
     patio::ui::update_dashboard(ui,model);
     check_rain_labels(36);
-    for(auto& h:model.weather.hours) h.snowfall_cm={};
+    model=patio::make_fixture(patio::FixtureId::BaselineRain);
+    patio::ui::update_dashboard(ui,model);
     // A moving marker sits on the rail without ever moving or obscuring its captions.
     auto noon = model.local_now;
     noon.hour = 12; noon.minute = 0;
@@ -331,9 +332,10 @@ int main() {
     check_rain_labels(7);
     assert(label(lv_scr_act(),"High 9°") && label(lv_scr_act(),"Low 4°") &&
            label(lv_scr_act(),"AQHI 3 • Low") && label(lv_scr_act(),"Sunrise 7:11 AM") &&
-           label(lv_scr_act(),"Sunset 5:23 PM") && label(lv_scr_act(),"STRONG"));
+           label(lv_scr_act(),"Sunset 5:23 PM") && label(lv_scr_act(),"Strong"));
     assert(!label(lv_scr_act(),"Morning") && !label(lv_scr_act(),"Forecast at a glance"));
-    auto* windy=lv_obj_get_parent(label(lv_scr_act(),"STRONG"));
+    assert(!label(lv_scr_act(),"WIND") && !label(lv_scr_act(),"RISK"));
+    auto* windy=lv_obj_get_parent(label(lv_scr_act(),"Strong"));
     assert(windy->coords.x1==468 && windy->coords.x2==614);
     assert(lv_color_to32(lv_obj_get_style_bg_color(windy,0)) == lv_color_to32(lv_color_hex(0xFFA354)));
     assert(label(lv_scr_act(),"CAUTION") && !label(lv_scr_act(),"LIGHT"));
@@ -351,7 +353,7 @@ int main() {
     time.hour=17; time.minute=0;
     patio::ui::minute_tick(ui,design.weather.hours[11].interval_start_utc,time);
     assert(!label(lv_scr_act(),"Take an umbrella"));
-    assert(!label(lv_scr_act(),"WIND") && !label(lv_scr_act(),"STRONG"));
+    assert(!label(lv_scr_act(),"WIND") && !label(lv_scr_act(),"Strong"));
     for(auto fixture : {patio::FixtureId::Snow,patio::FixtureId::Thunderstorm,patio::FixtureId::HighUv}) {
         auto d=patio::make_fixture(fixture);
         patio::ui::update_dashboard(ui,d);
@@ -363,10 +365,14 @@ int main() {
     lv_obj_update_layout(lv_scr_act());
     assert(!label(lv_scr_act(),"WIND") && !label(lv_scr_act(),"Today is"));
     assert(label(lv_scr_act(),"WARNING") && label(lv_scr_act(),"Wear a hat and sunscreen"));
-    auto* uv=one_line("HIGH UV • 7");
+    auto* uv=one_line("UV 7");
     auto* band=lv_obj_get_parent(uv);
     assert(band->coords.x1==370 && band->coords.x2==515);
-    assert(lv_color_to32(lv_obj_get_style_bg_color(band,0)) == lv_color_to32(lv_color_hex(0xFFA354)));
+    assert(lv_color_to32(lv_obj_get_style_bg_color(band,0)) == lv_color_to32(lv_color_hex(0x365A6B)));
+    auto* uv_alert=lv_obj_get_parent(one_line("High UV"));
+    assert(uv_alert->coords.x1==369 && uv_alert->coords.x2==515 &&
+           uv_alert->coords.y1>label(lv_scr_act(),"Noon")->coords.y2);
+    assert(lv_color_to32(lv_obj_get_style_bg_color(uv_alert,0)) == lv_color_to32(lv_color_hex(0xFFA354)));
     auto gusts=sunny;
     gusts.weather.hours[7].gust_kmh.value=41; gusts.weather.hours[8].gust_kmh.value=30;
     patio::ui::update_dashboard(ui,gusts);
@@ -377,7 +383,52 @@ int main() {
         const auto width=lv_txt_get_width(word,std::strlen(word),lv_obj_get_style_text_font(name,0),
                                           lv_obj_get_style_text_letter_space(name,0),LV_TEXT_FLAG_NONE);
         assert(width<=lv_obj_get_content_width(name));
+        auto* bg=lv_obj_get_parent(name);
+        auto* icon=lv_obj_get_child(bg,0);
+        assert(bg->coords.x2-bg->coords.x1<50 && icon!=name && icon->coords.y2<name->coords.y1 &&
+               icon->coords.x1>=bg->coords.x1 && icon->coords.x2<=bg->coords.x2);
     }
+    auto snow=patio::make_fixture(patio::FixtureId::SnowWind);
+    patio::ui::update_dashboard(ui,snow);
+    lv_obj_update_layout(lv_scr_act());
+    auto* heavy=label(lv_scr_act(),"Heavy");
+    auto* strong=label(lv_scr_act(),"Strong");
+    assert(heavy && strong);
+    auto* snow_box=lv_obj_get_parent(heavy); auto* wind_box=lv_obj_get_parent(strong);
+    assert(snow_box->coords.x1==wind_box->coords.x1 && snow_box->coords.x2<wind_box->coords.x2 &&
+           snow_box->coords.y2<wind_box->coords.y1);
+    tap_object(heavy);
+    assert(label(lv_scr_act(),"Forecast alerts") && label(lv_scr_act(),"2–3 PM") && label(lv_scr_act(),"Heavy snow") &&
+           label(lv_scr_act(),"Up to 4 cm of snow in one hour"));
+    tap(52,38);
+    tap_object(label(lv_scr_act(),"Strong"));
+    assert(label(lv_scr_act(),"2–5 PM") && label(lv_scr_act(),"Strong wind"));
+    tap(52,38);
+    auto mixed=patio::make_fixture(patio::FixtureId::MixedAlerts);
+    patio::ui::update_dashboard(ui,mixed);
+    lv_obj_update_layout(lv_scr_act());
+    auto* caution=one_line("UV caution");
+    auto* more=one_line("+2 more");
+    auto* storm_chip=one_line("Storm");
+    assert(lv_color_to32(lv_obj_get_style_bg_color(lv_obj_get_parent(caution),0))==
+           lv_color_to32(lv_color_hex(0xF2CA52)));
+    assert(lv_obj_get_parent(more)->coords.x1==lv_obj_get_parent(storm_chip)->coords.x1 &&
+           more->coords.y1>storm_chip->coords.y2);
+    tap_object(more);
+    assert(label(lv_scr_act(),"Forecast alerts") && label(lv_scr_act(),"4–6 PM") &&
+           label(lv_scr_act(),"Heavy rain") && label(lv_scr_act(),"Strong wind") &&
+           label(lv_scr_act(),"Up to 12 mm of rain in one hour"));
+    tap(52,38);
+    tap_object(label(lv_scr_act(),"UV caution"));
+    assert(label(lv_scr_act(),"10 AM–1 PM") && label(lv_scr_act(),"Peak UV index: 4"));
+    tap(52,38);
+    auto no_uv=settings;
+    no_uv.uv_advice_enabled=false;
+    patio::ui::update_settings(ui,no_uv);
+    patio::ui::update_dashboard(ui,mixed);
+    assert(!label(lv_scr_act(),"UV caution") && !label(lv_scr_act(),"High UV") && !label(lv_scr_act(),"UV 7") &&
+           label(lv_scr_act(),"Storm") && label(lv_scr_act(),"+2 more"));
+    patio::ui::update_settings(ui,settings);
     auto holiday=patio::make_fixture(patio::FixtureId::CloudyHoliday);
     patio::ui::update_dashboard(ui,holiday);
     lv_obj_update_layout(lv_scr_act());
@@ -397,13 +448,19 @@ int main() {
     // alone is not permission to remove a forecast thunderstorm from the rail.
     auto storm_holiday=holiday;
     for(int i=7;i<9;++i) storm_holiday.weather.hours[i].weather_code.value=95;
+    storm_holiday.weather.hours[7].snowfall_cm=patio::Optional<float>::some(4);
     storm_holiday.advice=patio::dashboard_advice(storm_holiday,settings);
     patio::ui::update_dashboard(ui,storm_holiday);
     lv_obj_update_layout(lv_scr_act());
     assert(one_line("National Day for Truth and Reconciliation")->coords.y2 < label(lv_scr_act(),"Noon")->coords.y1);
-    auto* storm_word=label(lv_scr_act(),"STORM");
-    assert(storm_word && label(lv_scr_act(),"RISK") && label(lv_scr_act(),"DANGER") && !label(lv_scr_act(),"LIGHT"));
+    auto* storm_word=label(lv_scr_act(),"Storm");
+    assert(storm_word && !label(lv_scr_act(),"WIND") && !label(lv_scr_act(),"RISK") &&
+           label(lv_scr_act(),"DANGER") && !label(lv_scr_act(),"LIGHT"));
     assert(lv_color_to32(lv_obj_get_style_bg_color(lv_obj_get_parent(storm_word),0))==lv_color_to32(lv_color_hex(0xFF6875)));
+    auto* storm_box=lv_obj_get_parent(storm_word);
+    auto* holiday_snow=lv_obj_get_parent(label(lv_scr_act(),"Heavy"));
+    assert(label(lv_scr_act(),"Noon")->coords.y2<storm_box->coords.y1 &&
+           storm_box->coords.y2<holiday_snow->coords.y1 && holiday_snow->coords.y2<407);
     for(auto& h:holiday.weather.hours) { h.wind_kmh={}; h.gust_kmh={}; }
     patio::ui::update_dashboard(ui,holiday);
     assert(label(lv_scr_act(),"Wind unavailable"));

@@ -2,7 +2,13 @@
 
 Compared the approved rainy-day mockup with the ESP32-S3 firmware’s LVGL 8 renderer at 1024 × 600, RGB565. The reference and simulator use sample readings. The production build has fixture mode disabled.
 
-[Rainy dashboard](screenshots/dashboard/rain.png) · [Snow, thunderstorm, high UV and calm weather](screenshots/dashboard/conditions.png)
+[Rainy dashboard](screenshots/dashboard/rain.png) · [Snow, thunderstorm, high UV and calm weather](screenshots/dashboard/conditions.png) · [Mixed alerts](screenshots/dashboard/mixed-alerts.png) · [Overlapping alert details](screenshots/dashboard/mixed-alert-details.png)
+
+### 1.0.31 hourly alert blocks
+
+The native mixed-day example shows yellow UV caution (10 AM–1 PM), orange high UV (1–3 PM), then a red thunderstorm overlapping heavy rain and strong wind (4–6 PM). A simulated touch on **+2 more** opens the rain and wind measurements for those same hours. On the snow example the single-hour snowflake and **Heavy** fit above the longer **Strong** wind block. The calm holiday example has no alert strip.
+
+The host tests check severity changes, coincident hazards, the UV preference and touch targets. They also check that refreshes keep the start of an ongoing window, expired blocks disappear, missing hours aren't bridged, and quarter-hour offsets stay aligned. The ESP32-S3 image was built and checked; these example screens were verified in the simulator.
 
 | Check | Finding and correction |
 | --- | --- |
@@ -15,7 +21,7 @@ All seven host suites passed, including 33 core cases. Native pointer tests cove
 
 On November 15, 2026, the ESP32-S3 was updated from 1.0.24 to 1.0.28. The USB boot log confirmed version 1.0.28, restored cached data, and Wi-Fi reconnection. Touch wake initialized with the saved 30-second timeout. For release 1.0.29 the rainy-day screenshot was rendered again and matched the previous PNG byte for byte. The new wake logic was exercised on the host; physical verification of this image remains open.
 
-### Revised dashboard and connection retries
+### 1.0.30 dashboard and connection retries
 
 Compared the 1024 × 600 native frames side by side with the approved examples: [sun with high UV](screenshots/dashboard/sunny-uv.png), [overcast BC holiday](screenshots/dashboard/cloudy-holiday.png), [rain](screenshots/dashboard/rain.png), [snow and wind](screenshots/dashboard/snow-wind.png), and [thunderstorm](screenshots/dashboard/storm.png).
 

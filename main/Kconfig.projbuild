@@ -18,7 +18,7 @@ config PATIO_FIXTURE_NAME
         negative-temperature, extreme-precipitation, missing-values,
         aqhi-10-plus, stale-air-quality, stale-weather, multiple-alerts,
         long-text, alert-feed-failure, unsupported-coverage, minimal-rain,
-        sunny-uv, cloudy-holiday, snow-wind, or storm-danger.
+        sunny-uv, cloudy-holiday, snow-wind, storm-danger, or mixed-alerts.
 
 config PATIO_HTTP_USER_AGENT
     string "Identifying HTTP User-Agent"

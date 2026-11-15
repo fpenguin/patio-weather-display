@@ -1,5 +1,11 @@
 # Build and test report
 
+## 1.0.31 public release — November 15, 2026
+
+The live-provider ESP32-S3 application is 2,104,496 bytes, leaving 2,941,776 bytes (58%) free in each OTA slot. The ESP-IDF 5.5.2 release build passed the image checksum and SHA-256 validation checks. The compiler checked 316 project stack frames; the largest was 2,672 bytes against a 4,096-byte limit.
+
+All seven host suites passed, including 41 core cases. The release simulator reproduced seven 1024 × 600 previews byte for byte: rain, sunny UV, a calm statutory holiday, snow with wind, a thunderstorm, [mixed hourly alerts](screenshots/dashboard/mixed-alerts.png), and the [overlapping alert details](screenshots/dashboard/mixed-alert-details.png). Simulated touches opened the correct forecast interval. Tests also cover block expiry, missing hours, quarter-hour offsets and disabling UV advice. This release was not flashed to a physical board.
+
 ## 1.0.30 public release — November 15, 2026
 
 The live-provider application is 2,098,400 bytes. It has 2,947,872 bytes free (about 58%) in each OTA slot. A clean ESP-IDF 5.5.2 build reported a valid application checksum and SHA-256 validation hash. All seven host suites passed (38 core cases). GCC reported 311 project stack frames, a 2,672-byte maximum, and no violations of the 4,096-byte limit.

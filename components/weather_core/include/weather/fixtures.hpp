@@ -37,6 +37,7 @@ enum class FixtureId : std::uint8_t {
     CloudyHoliday,
     SnowWind,
     StormDanger,
+    MixedAlerts,
 };
 
 DashboardModel make_fixture(FixtureId id);
